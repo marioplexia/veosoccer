@@ -71,6 +71,12 @@ language sql stable security definer set search_path = public as $$
     where team_id = t and user_id = auth.uid() and role in ('owner','coach','analyst'));
 $$;
 
+create function is_team_owner(t uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from team_members
+    where team_id = t and user_id = auth.uid() and role = 'owner');
+$$;
+
 -- El creador de un equipo queda como owner
 create function add_owner_member() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -88,14 +94,13 @@ alter table match_events enable row level security;
 alter table clips enable row level security;
 alter table notes enable row level security;
 
-create policy teams_select on teams for select using (is_team_member(id));
+create policy teams_select on teams for select using (is_team_member(id) or created_by = auth.uid());
 create policy teams_insert on teams for insert with check (created_by = auth.uid());
 create policy teams_update on teams for update using (is_team_editor(id));
 
 create policy members_select on team_members for select using (is_team_member(team_id));
 create policy members_manage on team_members for all
-  using (exists (select 1 from team_members m where m.team_id = team_members.team_id
-                 and m.user_id = auth.uid() and m.role = 'owner'));
+  using (is_team_owner(team_id)) with check (is_team_owner(team_id));
 
 create policy matches_select on matches for select using (is_team_member(team_id));
 create policy matches_write on matches for all
@@ -123,3 +128,12 @@ create index on matches(team_id);
 create index on match_events(match_id, at_seconds);
 create index on clips(match_id);
 create index on notes(match_id);
+
+-- Endurecimiento: las funciones SECURITY DEFINER no deben ser invocables por anon.
+revoke execute on function public.add_owner_member() from public, anon, authenticated;
+revoke execute on function public.is_team_member(uuid) from public, anon;
+revoke execute on function public.is_team_editor(uuid) from public, anon;
+revoke execute on function public.is_team_owner(uuid) from public, anon;
+grant execute on function public.is_team_member(uuid) to authenticated;
+grant execute on function public.is_team_editor(uuid) to authenticated;
+grant execute on function public.is_team_owner(uuid) to authenticated;
