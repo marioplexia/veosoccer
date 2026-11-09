@@ -1,4 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import CreateTournament from "@/components/CreateTournament";
+import { Card, Empty } from "@/components/ui";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -10,12 +13,14 @@ export default async function Panel() {
 
   const { data: profile } = await supabase.from("profiles").select("full_name, account_type").eq("id", user.id).single();
   const isClub = profile?.account_type === "club_owner";
-  const { data: items } = isClub
-    ? await supabase.from("teams").select("id, name").order("created_at")
-    : await supabase.from("tournaments").select("id, name").order("created_at");
+
+  const [{ data: tournaments }, { data: clubs }] = await Promise.all([
+    supabase.from("tournaments").select("id, name, start_date").order("created_at", { ascending: false }),
+    isClub ? supabase.from("teams").select("id, name").order("created_at") : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+  ]);
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-12">
+    <main className="mx-auto max-w-5xl space-y-8 px-6 py-12">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-widest text-emerald-600">
@@ -30,15 +35,36 @@ export default async function Panel() {
         </form>
       </div>
 
-      <h2 className="mt-10 text-lg font-semibold text-slate-900">{isClub ? "Tus clubes" : "Tus torneos"}</h2>
-      {items && items.length > 0 ? (
-        <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-          {items.map((i) => (
-            <li key={i.id} className="rounded-xl border border-slate-200 p-4 font-medium text-slate-900">{i.name}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-4 text-slate-600">Todavía no tienes {isClub ? "ningún club" : "ningún torneo"}.</p>
+      <Card title="Tus torneos">
+        {tournaments && tournaments.length > 0 ? (
+          <ul className="mb-6 grid gap-3 sm:grid-cols-2">
+            {tournaments.map((t) => (
+              <li key={t.id}>
+                <Link href={`/panel/torneos/${t.id}`} className="block rounded-xl border border-slate-200 p-4 transition hover:border-emerald-600 hover:bg-emerald-50/40">
+                  <span className="block font-semibold text-slate-900">{t.name}</span>
+                  <span className="mt-1 block text-sm text-slate-500">{t.start_date ? `Inicia el ${t.start_date}` : "Sin fecha de inicio"}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="mb-6"><Empty>Todavía no tienes torneos. Crea el primero aquí abajo.</Empty></div>
+        )}
+        <CreateTournament />
+      </Card>
+
+      {isClub && (
+        <Card title="Tus clubes">
+          {clubs && clubs.length > 0 ? (
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {clubs.map((c) => (
+                <li key={c.id} className="rounded-xl border border-slate-200 p-4 font-medium text-slate-900">{c.name}</li>
+              ))}
+            </ul>
+          ) : (
+            <Empty>Todavía no tienes ningún club.</Empty>
+          )}
+        </Card>
       )}
     </main>
   );
