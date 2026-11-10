@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BrandKind, BrandSettings } from "@/lib/brand";
-import { DEFAULT_MATCH, FORMATS, TEMPLATES, drawScene, templateById, type FieldKey, type FormatId, type MatchData, type SceneId } from "@/lib/motion/scenes";
+import { DEFAULT_MATCH, FORMATIONS, FORMATS, TEMPLATES, drawScene, parseFormation, templateById, type FieldKey, type FormatId, type MatchData, type SceneId, type SceneImage } from "@/lib/motion/scenes";
 import { btnGhost, btnPrimary, Card, ErrorMsg, inputCls } from "@/components/ui";
 import { useGoogleFonts } from "./useGoogleFonts";
 
@@ -24,6 +24,23 @@ function download(blob: Blob, name: string) {
 
 const label = "block text-sm font-medium text-slate-700";
 
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const MAX_IMAGE = 8 * 1024 * 1024;
+type LocalImage = SceneImage & { url: string };
+
+/** Botón para elegir una imagen del dispositivo (no se sube a ningún servidor). */
+function ImageButton({ text, has, onPick, onClear }: { text: string; has: boolean; onPick: (f: File) => void; onClear: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <label className={`cursor-pointer rounded-full border px-3 py-1.5 text-sm font-medium ${has ? "border-emerald-600 bg-emerald-50 text-emerald-800" : "border-slate-300 text-slate-700 hover:bg-slate-50"}`}>
+        {has ? "✓ " : ""}{text}
+        <input type="file" accept={IMAGE_TYPES.join(",")} className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ""; }} />
+      </label>
+      {has && <button type="button" onClick={onClear} aria-label={`Quitar ${text}`} className="rounded-full px-1.5 text-slate-400 hover:text-red-600">✕</button>}
+    </span>
+  );
+}
+
 export default function MotionStudio({
   kind, settings, logoUrl, tournamentName, matches,
 }: { kind: BrandKind; settings: BrandSettings; logoUrl: string | null; tournamentName: string; matches: MatchOption[] }) {
@@ -38,6 +55,23 @@ export default function MotionStudio({
   const [logo, setLogo] = useState<{ img: HTMLImageElement; w: number; h: number } | null>(null);
   const [fontsTick, setFontsTick] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [images, setImages] = useState<Record<string, LocalImage>>({});
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  useEffect(() => () => { Object.values(imagesRef.current).forEach((x) => URL.revokeObjectURL(x.url)); }, []);
+
+  function pickImage(key: string, file: File) {
+    setError(null);
+    if (!IMAGE_TYPES.includes(file.type)) return setError("La imagen debe ser PNG, JPG o WebP.");
+    if (file.size > MAX_IMAGE) return setError("La imagen no puede pesar más de 8 MB.");
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => setImages((m) => { if (m[key]) URL.revokeObjectURL(m[key].url); return { ...m, [key]: { url, img, w: img.naturalWidth, h: img.naturalHeight } }; });
+    img.onerror = () => { URL.revokeObjectURL(url); setError("No se pudo leer esa imagen."); };
+    img.src = url;
+  }
+  const clearImage = (key: string) => setImages((m) => { if (m[key]) URL.revokeObjectURL(m[key].url); const n = { ...m }; delete n[key]; return n; });
+  const imgBtn = (key: string, text: string) => <ImageButton text={text} has={!!images[key]} onPick={(f) => pickImage(key, f)} onClear={() => clearImage(key)} />;
 
   const tpl = templateById(id);
   const { w, h } = FORMATS[format];
@@ -67,8 +101,8 @@ export default function MotionStudio({
   }, [logoUrl]);
 
   // Referencia a los últimos valores, para que el bucle de animación no use datos viejos.
-  const live = useRef({ id, w, h, kind, settings, logo, tournamentName, data });
-  live.current = { id, w, h, kind, settings, logo, tournamentName, data };
+  const live = useRef({ id, w, h, kind, settings, logo, tournamentName, data, images });
+  live.current = { id, w, h, kind, settings, logo, tournamentName, data, images };
 
   const render = useCallback((time: number) => {
     const canvas = canvasRef.current;
@@ -78,7 +112,7 @@ export default function MotionStudio({
     drawScene(ctx, L.id, {
       w: L.w, h: L.h, t: time, kind: L.kind, colors: L.settings.colors, fonts: L.settings.fonts,
       logo: L.logo?.img ?? null, logoSize: L.logo ? { w: L.logo.w, h: L.logo.h } : null,
-      tournamentName: L.tournamentName, data: L.data,
+      tournamentName: L.tournamentName, data: L.data, images: L.images,
     });
   }, []);
 
@@ -98,11 +132,11 @@ export default function MotionStudio({
     return () => cancelAnimationFrame(raf);
   // `t` se omite a propósito: solo se usa para retomar donde se quedó.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, exporting, id, format, tpl.duration, render, settings, data, logo, fontsTick, tournamentName]);
+  }, [playing, exporting, id, format, tpl.duration, render, settings, data, logo, fontsTick, tournamentName, images]);
 
-  useEffect(() => { if (!playing) render(Math.min(t, tpl.duration)); }, [t, playing, render, tpl.duration]);
+  useEffect(() => { if (!playing) render(Math.min(t, tpl.duration)); }, [t, playing, render, tpl.duration, images, data]);
 
-  function chooseTemplate(next: SceneId) { setId(next); setT(0); setError(null); }
+  function chooseTemplate(next: SceneId) { setId(next); setT(0); setError(null); const f = templateById(next).format; if (f) setFormat(f); }
   const set = <K extends keyof MatchData>(k: K, v: MatchData[K]) => setData((d) => ({ ...d, [k]: v }));
   const num = (v: string, min: number, max: number) => Math.min(max, Math.max(min, Math.round(Number(v) || 0)));
 
@@ -160,6 +194,8 @@ export default function MotionStudio({
   function exportPng() {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    // Los carteles se exportan ya armados, aunque la vista previa vaya por el inicio.
+    if (tpl.poster != null) { setPlaying(false); setT(tpl.poster); render(tpl.poster); }
     canvas.toBlob((b) => { if (b) download(b, `${id}-${format}.png`); }, "image/png");
   }
 
@@ -218,12 +254,61 @@ export default function MotionStudio({
               </select>
             </label>
           )}
+          {(has("homeLogo") || has("awayLogo")) && (
+            <div className="flex flex-wrap gap-2">
+              {has("homeLogo") && imgBtn("homeLogo", "Escudo local")}
+              {has("awayLogo") && imgBtn("awayLogo", "Escudo visitante")}
+            </div>
+          )}
+          {has("teamTitle") && <label className={label}>Título<input className={`${inputCls} mt-1`} value={data.teamTitle} maxLength={60} onChange={(e) => set("teamTitle", e.target.value)} /></label>}
+          {has("awardTitle") && <label className={label}>Título<input className={`${inputCls} mt-1`} value={data.awardTitle} maxLength={60} onChange={(e) => set("awardTitle", e.target.value)} /></label>}
+          {has("label") && <label className={label}>Etiqueta<input className={`${inputCls} mt-1`} value={data.label} maxLength={20} onChange={(e) => set("label", e.target.value)} /></label>}
           {has("player") && <label className={label}>Jugador<input className={`${inputCls} mt-1`} value={data.player} maxLength={40} onChange={(e) => set("player", e.target.value)} /></label>}
           {has("playerOut") && <label className={label}>Jugador que sale<input className={`${inputCls} mt-1`} value={data.playerOut} maxLength={40} onChange={(e) => set("playerOut", e.target.value)} /></label>}
           {has("playerIn") && <label className={label}>Jugador que entra<input className={`${inputCls} mt-1`} value={data.playerIn} maxLength={40} onChange={(e) => set("playerIn", e.target.value)} /></label>}
           {has("minute") && <label className={label}>Minuto<input type="number" min={0} max={150} className={`${inputCls} mt-1`} value={data.minute} onChange={(e) => set("minute", num(e.target.value, 0, 150))} /></label>}
           {has("round") && <label className={label}>Jornada<input type="number" min={1} max={99} className={`${inputCls} mt-1`} value={data.round} onChange={(e) => set("round", num(e.target.value, 1, 99))} /></label>}
           {has("subtitle") && <label className={label}>Texto (fecha u horario)<input className={`${inputCls} mt-1`} value={data.subtitle} maxLength={60} onChange={(e) => set("subtitle", e.target.value)} /></label>}
+          {(has("photo") || has("teamLogo")) && (
+            <div className="flex flex-wrap gap-2">
+              {has("photo") && imgBtn("photo", "Foto del jugador")}
+              {has("teamLogo") && imgBtn("teamLogo", "Escudo del equipo")}
+            </div>
+          )}
+          {has("formation") && (
+            <label className={label}>Formación
+              <select className={`${inputCls} mt-1`} value={data.formation} onChange={(e) => set("formation", e.target.value)}>
+                {FORMATIONS.map((f) => <option key={f} value={f}>{f}{f.split("-").reduce((a, b) => a + Number(b), 0) < 10 ? " (fútbol 7)" : ""}</option>)}
+              </select>
+            </label>
+          )}
+          {has("players") && (
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium text-slate-700">Jugadores (el primero es el portero)</legend>
+              {data.players.slice(0, 1 + parseFormation(data.formation).reduce((a, b) => a + b, 0)).map((p, k) => (
+                <div key={k} className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={p.color}
+                    onChange={(e) => set("players", data.players.map((x, j) => (j === k ? { ...x, color: e.target.value.toUpperCase() } : x)))}
+                    aria-label={`Color de la tarjeta ${k + 1}`}
+                    className="h-9 w-9 shrink-0 cursor-pointer rounded border border-slate-300 p-0.5"
+                  />
+                  <input
+                    className={inputCls}
+                    value={p.name}
+                    maxLength={24}
+                    onChange={(e) => set("players", data.players.map((x, j) => (j === k ? { ...x, name: e.target.value } : x)))}
+                    aria-label={`Nombre del jugador ${k + 1}`}
+                  />
+                  {imgBtn(`p${k}`, "Foto")}
+                </div>
+              ))}
+            </fieldset>
+          )}
+          {(has("homeLogo") || has("photo") || has("players")) && (
+            <p className="text-xs text-slate-500">Las imágenes se usan solo en este dispositivo para armar la pieza; no se guardan en el torneo.</p>
+          )}
           {tpl.fields.length === 0 && <p className="text-sm text-slate-500">Esta animación no necesita datos: usa tu logo y los colores de la marca.</p>}
         </div>
 

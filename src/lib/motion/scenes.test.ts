@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRANDS } from "@/lib/brand";
-import { DEFAULT_MATCH, FORMATS, TEMPLATES, drawScene, stageState, templateById, vividMid, washPalette, type FormatId, type SceneInput } from "./scenes";
+import { DEFAULT_MATCH, FORMATS, TEMPLATES, drawScene, parseFormation, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
 
 /** Contexto 2D falso: registra las llamadas de texto y acepta cualquier otra operación. */
 function fakeCtx() {
@@ -136,5 +136,47 @@ describe("vividMid", () => {
   });
   it("con grises usa la mezcla simple", () => {
     expect(vividMid("#000000", "#FFFFFF")).toBe("#808080");
+  });
+});
+
+describe("carteles", () => {
+  it("la presentación de partido muestra el torneo, los equipos y la fecha", () => {
+    const f = fakeCtx();
+    drawScene(f.ctx, "matchup", input("tournament", "horizontal", 4));
+    expect(f.texts).toContain("Liga Municipal");
+    expect(f.texts).toContain("presenta");
+    expect(f.texts).toContain("Leones v Tigres");
+    expect(f.texts).toContain("Domingo 8 de noviembre");
+  });
+  it("el equipo ideal dibuja una tarjeta por jugador según la formación", () => {
+    const f = fakeCtx();
+    drawScene(f.ctx, "totw", input("tournament", "portrait", 4.5));
+    expect(f.texts.filter((x) => /^Jugador \d+$/.test(x))).toHaveLength(11);
+    expect(f.texts).toContain("Jornada 6");
+    const seven = fakeCtx();
+    drawScene(seven.ctx, "totw", input("tournament", "portrait", 4.5, { data: { ...DEFAULT_MATCH, formation: "3-2-1" } }));
+    expect(seven.texts.filter((x) => /^Jugador \d+$/.test(x))).toHaveLength(7);
+  });
+  it("el jugador de la jornada muestra título, etiqueta y nombre", () => {
+    const f = fakeCtx();
+    drawScene(f.ctx, "potw", input("tournament", "portrait", 4.5, { data: { ...DEFAULT_MATCH, player: "Ana Ruiz" } }));
+    expect(f.texts).toContain("GANADOR");
+    expect(f.texts).toContain("Ana Ruiz");
+    expect(f.texts.join(" ")).toContain("JUGADOR DE LA");
+  });
+  it("parseFormation valida la formación", () => {
+    expect(parseFormation("4-4-2")).toEqual([4, 4, 2]);
+    expect(parseFormation("3-2-1")).toEqual([3, 2, 1]);
+    for (const bad of ["", "abc", "9-9-9", "4-0-2", "6-3-1", "1-1-1-1-1-1"]) expect(parseFormation(bad)).toEqual([4, 3, 3]);
+  });
+});
+
+describe("vividMix", () => {
+  it("respeta los extremos y no se apaga a mitad de camino", () => {
+    expect(vividMix("#EBFF00", "#963CFF", 0)).toBe("#EBFF00");
+    expect(vividMix("#EBFF00", "#963CFF", 1)).toBe("#963CFF");
+    const mid = vividMix("#EBFF00", "#963CFF", 0.5);
+    const [r, g, b] = [1, 3, 5].map((k) => parseInt(mid.slice(k, k + 2), 16));
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeGreaterThan(150);
   });
 });

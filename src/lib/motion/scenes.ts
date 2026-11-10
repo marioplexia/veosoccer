@@ -12,21 +12,42 @@ export type MatchData = {
   player: string; minute: number;
   playerOut: string; playerIn: string;
   round: number; subtitle: string;
+  teamTitle: string; awardTitle: string; label: string;
+  formation: string;
+  players: PlayerCard[];
 };
+
+export type PlayerCard = { name: string; color: string };
+export type SceneImage = { img: CanvasImageSource; w: number; h: number };
+
+export const FORMATIONS = ["4-3-3", "4-4-2", "4-2-3-1", "3-5-2", "3-4-3", "5-3-2", "3-2-1", "2-3-1"] as const;
+const CARD_COLORS = ["#DC2626", "#1D4ED8", "#059669", "#7C3AED", "#EA580C", "#0F172A"];
+
+/** "4-3-3" -> [4, 3, 3]. Entre 1 y 5 líneas de 1 a 5 jugadores, máximo 10 de campo; si no, 4-3-3. */
+export function parseFormation(s: string): number[] {
+  const parts = s.split("-").map((x) => Number(x.trim()));
+  const ok = parts.length >= 1 && parts.length <= 5 && parts.every((n) => Number.isInteger(n) && n >= 1 && n <= 5) && parts.reduce((a, b) => a + b, 0) <= 10;
+  return ok ? parts : [4, 3, 3];
+}
 
 export const DEFAULT_MATCH: MatchData = {
   home: "Leones", away: "Tigres", homeScore: 2, awayScore: 1, side: "home",
   player: "Nombre Apellido", minute: 34, playerOut: "Jugador Sale", playerIn: "Jugador Entra", round: 6, subtitle: "Domingo 8 de noviembre",
+  teamTitle: "Equipo ideal de la jornada", awardTitle: "Jugador de la jornada", label: "Ganador", formation: "4-3-3",
+  players: Array.from({ length: 11 }, (_, k) => ({ name: `Jugador ${k + 1}`, color: CARD_COLORS[k % CARD_COLORS.length] })),
 };
 
-export type SceneId = "ident" | "matchday" | "goal" | "halftime" | "fulltime" | "kickoff" | "yellow" | "red" | "substitution";
-export type FieldKey = "match" | "home" | "away" | "homeScore" | "awayScore" | "side" | "player" | "minute" | "playerOut" | "playerIn" | "round" | "subtitle";
+export type SceneId = "ident" | "matchday" | "matchup" | "totw" | "potw" | "goal" | "halftime" | "fulltime" | "kickoff" | "yellow" | "red" | "substitution";
+export type FieldKey = "match" | "home" | "away" | "homeScore" | "awayScore" | "side" | "player" | "minute" | "playerOut" | "playerIn" | "round" | "subtitle" | "homeLogo" | "awayLogo" | "teamLogo" | "photo" | "teamTitle" | "awardTitle" | "label" | "formation" | "players";
 
-export type TemplateDef = { id: SceneId; kind: BrandKind; label: string; description: string; duration: number; fields: FieldKey[] };
+export type TemplateDef = { id: SceneId; kind: BrandKind; label: string; description: string; duration: number; fields: FieldKey[]; format?: FormatId; poster?: number };
 
 export const TEMPLATES: TemplateDef[] = [
   { id: "ident", kind: "tournament", label: "Intro con logo", description: "Panel de color que cambia, pasa a blanco mientras el logo gira y florece el siguiente color.", duration: 5.8, fields: [] },
   { id: "matchday", kind: "tournament", label: "Anuncio de jornada", description: "Presenta la jornada con el nombre del torneo.", duration: 5, fields: ["round", "subtitle"] },
+  { id: "matchup", kind: "tournament", label: "Presentación de partido", description: "Los dos escudos con tu logo al centro, el partido y la fecha.", duration: 5, fields: ["match", "home", "away", "homeLogo", "awayLogo", "subtitle"], poster: 3.5 },
+  { id: "totw", kind: "tournament", label: "Equipo ideal", description: "Cancha con las tarjetas de los jugadores en su formación.", duration: 5, fields: ["teamTitle", "round", "formation", "players"], format: "portrait", poster: 4 },
+  { id: "potw", kind: "tournament", label: "Jugador de la jornada", description: "Foto y nombre del jugador destacado.", duration: 5, fields: ["awardTitle", "label", "round", "player", "photo", "teamLogo"], format: "portrait", poster: 4 },
   { id: "goal", kind: "broadcast", label: "Gol", description: "¡GOL! con el goleador, el minuto y el marcador actualizado.", duration: 5.2, fields: ["match", "home", "away", "homeScore", "awayScore", "side", "player", "minute"] },
   { id: "halftime", kind: "broadcast", label: "Medio tiempo", description: "Resultado al descanso.", duration: 5, fields: ["match", "home", "away", "homeScore", "awayScore"] },
   { id: "fulltime", kind: "broadcast", label: "Final del partido", description: "Resultado final.", duration: 5, fields: ["match", "home", "away", "homeScore", "awayScore"] },
@@ -39,6 +60,7 @@ export const TEMPLATES: TemplateDef[] = [
 export const FORMATS = {
   horizontal: { label: "Horizontal 16:9 (1920×1080)", w: 1920, h: 1080 },
   vertical: { label: "Vertical 9:16 (1080×1920)", w: 1080, h: 1920 },
+  portrait: { label: "Retrato 4:5 (1080×1350)", w: 1080, h: 1350 },
   square: { label: "Cuadrado 1:1 (1080×1080)", w: 1080, h: 1080 },
 } as const;
 export type FormatId = keyof typeof FORMATS;
@@ -50,6 +72,7 @@ export type SceneInput = {
   fonts: BrandSettings["fonts"];
   logo: CanvasImageSource | null;
   logoSize: { w: number; h: number } | null;
+  images?: Record<string, SceneImage>;
   tournamentName: string;
   data: MatchData;
 };
@@ -221,11 +244,20 @@ export function vividMid(a: string, b: string): string {
   if (dh < -180) dh += 360;
   return hsvToHex({ h: x.h + dh / 2, s: (x.s + y.s) / 2, v: Math.max(x.v, y.v) });
 }
+/** Mezcla recorriendo el matiz, para que el paso entre dos colores vivos no se apague. */
+export function vividMix(a: string, b: string, k: number): string {
+  const x = hexToHsv(a), y = hexToHsv(b);
+  if (x.s < 0.15 || y.s < 0.15) return mix(a, b, k);
+  let dh = y.h - x.h;
+  if (dh > 180) dh -= 360;
+  if (dh < -180) dh += 360;
+  return hsvToHex({ h: x.h + dh * k, s: lerp(x.s, y.s, k), v: lerp(x.v, y.v, k) });
+}
 function samplePalette(pal: string[], x: number): string {
   const n = pal.length;
   const k = ((x % n) + n) % n;
   const i0 = Math.floor(k);
-  return mix(pal[i0], pal[(i0 + 1) % n], k - i0);
+  return vividMix(pal[i0], pal[(i0 + 1) % n], k - i0);
 }
 
 /** Color de tinta: oscuro de la marca (o casi negro si no contrasta con blanco). */
@@ -569,12 +601,316 @@ function sceneSubstitution(ctx: Ctx, i: SceneInput) {
   ctx.restore();
 }
 
+/* ───────────── carteles: partido, equipo ideal, jugador de la jornada ───────────── */
+
+const appear = (t: number, k: number) => easeOutCubic(progress(t, 0.15 + k * 0.12, 0.65 + k * 0.12));
+
+function brandGradient(ctx: Ctx, i: SceneInput, x0: number, y0: number, x1: number, y1: number) {
+  const pal = washPalette(i.kind, i.colors);
+  const ph = 0.12 * Math.sin(i.t * 0.9) + 0.12; // vaivén suave alrededor del primer par de colores
+  const a = samplePalette(pal, ph), b = samplePalette(pal, ph + 1);
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  g.addColorStop(0, a); g.addColorStop(0.5, vividMid(a, b)); g.addColorStop(1, b);
+  return g;
+}
+
+function posterBase(ctx: Ctx, i: SceneInput) {
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, i.w, i.h);
+  shards(ctx, i.w, i.h, i.t, inkOf(i), 0.02);
+}
+
+function contain(ctx: Ctx, im: SceneImage, cx: number, cy: number, maxW: number, maxH: number) {
+  const k = Math.min(maxW / im.w, maxH / im.h);
+  ctx.drawImage(im.img, cx - (im.w * k) / 2, cy - (im.h * k) / 2, im.w * k, im.h * k);
+}
+/** Rellena el rectángulo recortando la imagen (prioriza la parte superior, donde suele estar la cara). */
+function cover(ctx: Ctx, im: SceneImage, x: number, y: number, w: number, h: number) {
+  const k = Math.max(w / im.w, h / im.h);
+  const sw = w / k, sh = h / k;
+  ctx.drawImage(im.img, (im.w - sw) / 2, (im.h - sh) * 0.2, sw, sh, x, y, w, h);
+}
+
+export function wrapLines(ctx: Ctx, s: string, f: FontSpec, px: number, maxW: number, maxLines = 2): string[] {
+  ctx.font = fontStr(f, px);
+  const lines: string[] = [];
+  let cur = "";
+  for (const word of s.trim().split(/\s+/).filter(Boolean)) {
+    const test = cur ? `${cur} ${word}` : word;
+    if (cur && ctx.measureText(test).width > maxW && lines.length < maxLines - 1) { lines.push(cur); cur = word; } else cur = test;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function silhouette(ctx: Ctx, cx: number, top: number, w: number, h: number) {
+  ctx.save();
+  ctx.fillStyle = "rgba(255,255,255,.4)";
+  ctx.beginPath(); ctx.arc(cx, top + h * 0.38, h * 0.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx, top + h * 1.02, w * 0.3, h * 0.38, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+/** Escudo de un equipo; si no se subió imagen, un círculo con sus siglas. */
+function teamBadge(ctx: Ctx, i: SceneInput, key: string, name: string, cx: number, cy: number, size: number) {
+  const u = Math.min(i.w, i.h) / 1080;
+  const im = i.images?.[key];
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.18)"; ctx.shadowBlur = 30 * u; ctx.shadowOffsetY = 8 * u;
+  if (im) contain(ctx, im, cx, cy, size, size);
+  else {
+    ctx.fillStyle = inkOf(i);
+    ctx.beginPath(); ctx.arc(cx, cy, size * 0.42, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.lineWidth = 8 * u; ctx.strokeStyle = "#FFFFFF"; ctx.stroke();
+    text(ctx, abbreviation(name, "?"), cx, cy, i.fonts.heading, size * 0.26, "#FFFFFF", { maxW: size * 0.7 });
+  }
+  ctx.restore();
+}
+
+function leagueLogo(ctx: Ctx, i: SceneInput, cx: number, cy: number, size: number) {
+  const u = Math.min(i.w, i.h) / 1080;
+  ctx.save();
+  ctx.shadowColor = "rgba(255,255,255,.95)"; ctx.shadowBlur = 24 * u;
+  if (!drawLogo(ctx, i, cx, cy, size, size)) {
+    ctx.shadowColor = "transparent";
+    text(ctx, abbreviation(i.tournamentName, "•"), cx, cy, i.fonts.heading, size * 0.5, inkOf(i), { stroke: "#FFFFFF", strokeW: 14 * u });
+  }
+  ctx.restore();
+}
+
+/** Banda superior de color con el logo colgando; devuelve la coordenada Y donde sigue el contenido. */
+function topBand(ctx: Ctx, i: SceneInput): number {
+  const { w, t } = i;
+  const u = Math.min(i.w, i.h) / 1080;
+  const bandH = 70 * u;
+  const a = appear(t, 0);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.translate(0, (1 - a) * -bandH);
+  ctx.fillStyle = brandGradient(ctx, i, w * 0.1, 0, w * 0.9, 0);
+  rr(ctx, w * 0.1, -40 * u, w * 0.8, bandH + 40 * u, 30 * u); ctx.fill();
+  leagueLogo(ctx, i, w / 2, bandH * 1.05, 120 * u);
+  ctx.restore();
+  return bandH + 105 * u;
+}
+
+function sceneMatchup(ctx: Ctx, i: SceneInput) {
+  const { w, h, t, data } = i;
+  const u = Math.min(w, h) / 1080;
+  const ink = inkOf(i);
+  const horizontal = w >= h;
+  posterBase(ctx, i);
+
+  const p0 = appear(t, 0);
+  const R = 60 * u;
+  ctx.save();
+  ctx.globalAlpha = p0;
+  if (horizontal) { ctx.translate((p0 - 1) * w * 0.15, 0); rr(ctx, -R, 0, w * 0.5 + R, h, R); }
+  else { ctx.translate(0, (p0 - 1) * h * 0.15); rr(ctx, 0, -R, w, h * 0.5 + R, R); }
+  ctx.fillStyle = horizontal ? brandGradient(ctx, i, 0, 0, w * 0.5, h) : brandGradient(ctx, i, 0, 0, w, h * 0.5);
+  ctx.fill();
+  ctx.clip();
+  shards(ctx, w, h, t * 1.4, "#FFFFFF", 0.12);
+  ctx.restore();
+
+  // "<torneo> presenta"
+  ctx.save(); ctx.globalAlpha = appear(t, 1);
+  const hx = w * 0.05, hy = horizontal ? h * 0.11 : h * 0.06;
+  const namePx = fitPx(ctx, i.tournamentName, i.fonts.heading, 56 * u, w * (horizontal ? 0.3 : 0.6));
+  text(ctx, i.tournamentName, hx, hy, i.fonts.heading, namePx, ink, { align: "left" });
+  ctx.font = fontStr(i.fonts.heading, namePx);
+  const nameW = ctx.measureText(i.tournamentName).width;
+  text(ctx, "presenta", hx + nameW + namePx * 0.3, hy, i.fonts.body, namePx, ink, { align: "left" });
+  ctx.restore();
+
+  const S = horizontal ? Math.min(w * 0.3, h * 0.5) : Math.min(w * 0.5, h * 0.24);
+  const pos = horizontal
+    ? { home: [w * 0.25, h * 0.52], away: [w * 0.75, h * 0.5], mid: [w * 0.5, h * 0.52], midS: S * 0.8 }
+    : { home: [w * 0.5, h * 0.27], away: [w * 0.5, h * 0.72], mid: [w * 0.5, h * 0.5], midS: S * 0.62 };
+  const pop = (k: number, fn: () => void, cx: number, cy: number) => {
+    const p = progress(t, 0.35 + k * 0.18, 0.9 + k * 0.18);
+    if (p <= 0) return;
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(lerp(0.6, 1, easeOutBack(p)), lerp(0.6, 1, easeOutBack(p))); ctx.translate(-cx, -cy);
+    ctx.globalAlpha = clamp01(p * 2.5); fn(); ctx.restore();
+  };
+  pop(0, () => teamBadge(ctx, i, "homeLogo", data.home, pos.home[0], pos.home[1], S), pos.home[0], pos.home[1]);
+  pop(1, () => teamBadge(ctx, i, "awayLogo", data.away, pos.away[0], pos.away[1], S), pos.away[0], pos.away[1]);
+  pop(2, () => leagueLogo(ctx, i, pos.mid[0], pos.mid[1], pos.midS), pos.mid[0], pos.mid[1]);
+
+  ctx.save(); ctx.globalAlpha = appear(t, 6);
+  const tx = horizontal ? w * 0.75 : w * 0.5;
+  const ty = horizontal ? h * 0.86 : h * 0.9;
+  text(ctx, `${data.home} v ${data.away}`, tx, ty, i.fonts.heading, 46 * u, ink, { maxW: w * (horizontal ? 0.44 : 0.9) });
+  text(ctx, data.subtitle, tx, ty + 56 * u, i.fonts.body, 40 * u, ink, { maxW: w * (horizontal ? 0.44 : 0.9) });
+  ctx.restore();
+}
+
+function playerCard(ctx: Ctx, i: SceneInput, p: PlayerCard, idx: number, cx: number, cy: number, S: number) {
+  const x = cx - S / 2, y = cy - S / 2;
+  const im = i.images?.[`p${idx}`];
+  const nameH = S * 0.27;
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.25)"; ctx.shadowBlur = S * 0.12; ctx.shadowOffsetY = S * 0.04;
+  ctx.fillStyle = p.color;
+  rr(ctx, x, y, S, S, S * 0.12); ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.clip();
+  const sheen = ctx.createLinearGradient(x, y, x + S, y + S);
+  sheen.addColorStop(0, "rgba(255,255,255,.22)"); sheen.addColorStop(0.6, "rgba(255,255,255,0)");
+  ctx.fillStyle = sheen; ctx.fillRect(x, y, S, S);
+  if (im) cover(ctx, im, x, y, S, S - nameH);
+  else silhouette(ctx, cx, y, S, S - nameH);
+  ctx.fillStyle = p.color; ctx.fillRect(x, y + S - nameH, S, nameH);
+  ctx.fillStyle = "rgba(0,0,0,.16)"; ctx.fillRect(x, y + S - nameH, S, nameH);
+  ctx.restore();
+  text(ctx, p.name, cx, y + S - nameH / 2, i.fonts.heading, S * 0.14, readableOn(p.color), { maxW: S * 0.9 });
+}
+
+function sceneTotw(ctx: Ctx, i: SceneInput) {
+  const { w, h, t, colors: c, data } = i;
+  const u = Math.min(w, h) / 1080;
+  const ink = inkOf(i);
+  posterBase(ctx, i);
+  let y = topBand(ctx, i);
+
+  ctx.save(); ctx.globalAlpha = appear(t, 1);
+  const titlePx = 92 * u;
+  const lines = wrapLines(ctx, data.teamTitle, i.fonts.heading, titlePx, w * 0.86);
+  y += titlePx * 0.75;
+  for (const line of lines) { text(ctx, line, w / 2, y, i.fonts.heading, titlePx, ink, { maxW: w * 0.9 }); y += titlePx * 1.05; }
+  ctx.restore();
+
+  ctx.save(); ctx.globalAlpha = appear(t, 2);
+  const pill = `Jornada ${data.round}`;
+  ctx.font = fontStr(i.fonts.body, 50 * u);
+  const pw = ctx.measureText(pill).width + 90 * u;
+  ctx.fillStyle = c.secondary; rr(ctx, w / 2 - pw / 2, y - titlePx * 0.45, pw, 74 * u, 16 * u); ctx.fill();
+  text(ctx, pill, w / 2, y - titlePx * 0.45 + 37 * u, i.fonts.body, 50 * u, readableOn(c.secondary));
+  ctx.restore();
+  y += 74 * u;
+
+  // cancha
+  const top = y, bottom = h - 24 * u;
+  const inset = w * 0.09;
+  const pa = appear(t, 3);
+  ctx.save(); ctx.globalAlpha = pa;
+  ctx.beginPath();
+  ctx.moveTo(inset, top); ctx.lineTo(w - inset, top); ctx.lineTo(w + 4, top + (bottom - top) * 0.6); ctx.lineTo(w + 4, bottom + 4); ctx.lineTo(-4, bottom + 4); ctx.lineTo(-4, top + (bottom - top) * 0.6);
+  ctx.closePath();
+  const pg = ctx.createLinearGradient(0, top, 0, bottom);
+  pg.addColorStop(0, "#E4E4EA"); pg.addColorStop(1, "#F4F4F7");
+  ctx.fillStyle = pg; ctx.fill();
+  ctx.lineWidth = 3 * u; ctx.strokeStyle = c.primary; ctx.stroke();
+  ctx.clip();
+  ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4 * u;
+  const midY = top + (bottom - top) * 0.6;
+  ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(w, midY); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(w / 2, midY, w * 0.16, (bottom - top) * 0.11, 0, 0, Math.PI * 2); ctx.stroke();
+  rr(ctx, w * 0.26, top - 20 * u, w * 0.48, (bottom - top) * 0.19 + 20 * u, 12 * u); ctx.stroke();
+  rr(ctx, w * 0.4, top - 20 * u, w * 0.2, (bottom - top) * 0.07 + 20 * u, 8 * u); ctx.stroke();
+  ctx.restore();
+
+  // tarjetas: portero arriba y luego cada línea
+  const rows = [1, ...parseFormation(data.formation)];
+  const gap = (bottom - top) / rows.length;
+  const S = Math.min(gap * 0.76, (w * 0.86) / (Math.max(...rows) * 1.22));
+  let idx = 0;
+  rows.forEach((n, r) => {
+    const cy = top + gap * (r + 0.5);
+    const spacing = Math.min(S * 1.55, (w * 0.9) / n);
+    for (let j = 0; j < n; j++) {
+      const p = data.players[idx];
+      const cx = w / 2 + (j - (n - 1) / 2) * spacing;
+      const k = progress(t, 0.7 + idx * 0.07, 1.15 + idx * 0.07);
+      if (p && k > 0) {
+        const sc = lerp(0.5, 1, easeOutBack(k));
+        ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.globalAlpha = clamp01(k * 2.5);
+        playerCard(ctx, i, p, idx, 0, 0, S);
+        ctx.restore();
+      }
+      idx++;
+    }
+  });
+}
+
+function scenePotw(ctx: Ctx, i: SceneInput) {
+  const { w, h, t, data } = i;
+  const u = Math.min(w, h) / 1080;
+  const ink = inkOf(i);
+  posterBase(ctx, i);
+  let y = topBand(ctx, i) + 40 * u;
+
+  // píldora "Jornada N | GANADOR"
+  ctx.save(); ctx.globalAlpha = appear(t, 1);
+  const left = `Jornada ${data.round}`, right = data.label.toUpperCase();
+  const px = 44 * u, ph = 70 * u;
+  ctx.font = fontStr(i.fonts.body, px); const lw = ctx.measureText(left).width + 50 * u;
+  ctx.font = fontStr(i.fonts.heading, px); const rw = right ? ctx.measureText(right).width + 50 * u : 0;
+  const x0 = w / 2 - (lw + rw) / 2;
+  ctx.save(); rr(ctx, x0, y, lw + rw, ph, 14 * u); ctx.clip();
+  ctx.fillStyle = brandGradient(ctx, i, x0, 0, x0 + lw, 0); ctx.fillRect(x0, y, lw, ph);
+  ctx.fillStyle = ink; ctx.fillRect(x0 + lw, y, rw, ph);
+  ctx.restore();
+  text(ctx, left, x0 + lw / 2, y + ph / 2, i.fonts.body, px, ink);
+  if (right) text(ctx, right, x0 + lw + rw / 2, y + ph / 2, i.fonts.heading, px, readableOn(ink));
+  ctx.restore();
+  y += ph + 30 * u;
+
+  ctx.save(); ctx.globalAlpha = appear(t, 2);
+  const titlePx = 118 * u;
+  const lines = wrapLines(ctx, data.awardTitle.toUpperCase(), i.fonts.heading, titlePx, w * 0.88);
+  y += titlePx * 0.55;
+  for (const line of lines) { text(ctx, line, w / 2, y, i.fonts.heading, titlePx, ink, { maxW: w * 0.9 }); y += titlePx * 0.98; }
+  ctx.restore();
+  y -= titlePx * 0.35;
+
+  // marco con la foto y el nombre
+  const bottomBand = 70 * u;
+  const fTop = y, fBottom = h - bottomBand - 90 * u;
+  const fh = Math.max(fBottom - fTop, 100 * u);
+  const fw = Math.min(w * 0.6, fh * 0.9);
+  const fx = w / 2 - fw / 2;
+  const nameH = Math.min(110 * u, fh * 0.2);
+  const k = progress(t, 0.6, 1.2);
+  if (k > 0) {
+    const sc = lerp(0.85, 1, easeOutBack(k));
+    ctx.save();
+    ctx.translate(w / 2, fTop + fh / 2); ctx.scale(sc, sc); ctx.translate(-w / 2, -(fTop + fh / 2));
+    ctx.globalAlpha = clamp01(k * 2);
+    ctx.shadowColor = "rgba(0,0,0,.2)"; ctx.shadowBlur = 40 * u; ctx.shadowOffsetY = 12 * u;
+    ctx.fillStyle = "#E5E7EB"; rr(ctx, fx, fTop, fw, fh, 26 * u); ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.save(); ctx.clip();
+    const im = i.images?.photo;
+    if (im) cover(ctx, im, fx, fTop, fw, fh - nameH);
+    else { ctx.fillStyle = ink; ctx.fillRect(fx, fTop, fw, fh - nameH); silhouette(ctx, w / 2, fTop, fw, fh - nameH); }
+    ctx.fillStyle = brandGradient(ctx, i, fx, 0, fx + fw, 0); ctx.fillRect(fx, fTop + fh - nameH, fw, nameH);
+    ctx.restore();
+    ctx.lineWidth = 5 * u; ctx.strokeStyle = "#FFFFFF"; rr(ctx, fx, fTop, fw, fh, 26 * u); ctx.stroke();
+    text(ctx, data.player, w / 2, fTop + fh - nameH / 2, i.fonts.heading, nameH * 0.5, ink, { maxW: fw * 0.9 });
+    ctx.restore();
+  }
+
+  // banda inferior con el escudo del equipo
+  const a = appear(t, 5);
+  ctx.save(); ctx.globalAlpha = a; ctx.translate(0, (1 - a) * bottomBand);
+  ctx.fillStyle = brandGradient(ctx, i, w * 0.12, 0, w * 0.88, 0);
+  rr(ctx, w * 0.12, h - bottomBand, w * 0.76, bottomBand + 40 * u, 30 * u); ctx.fill();
+  const logo = i.images?.teamLogo;
+  if (logo) contain(ctx, logo, w / 2, h - bottomBand - 5 * u, 130 * u, 130 * u);
+  ctx.restore();
+}
+
 export function drawScene(ctx: Ctx, id: SceneId, input: SceneInput) {
   ctx.save();
   ctx.clearRect(0, 0, input.w, input.h);
   switch (id) {
     case "ident": sceneIdent(ctx, input); break;
     case "matchday": sceneMatchday(ctx, input); break;
+    case "matchup": sceneMatchup(ctx, input); break;
+    case "totw": sceneTotw(ctx, input); break;
+    case "potw": scenePotw(ctx, input); break;
     case "goal": sceneGoal(ctx, input); break;
     case "halftime": sceneResult(ctx, input, "MEDIO TIEMPO", "45:00"); break;
     case "fulltime": sceneResult(ctx, input, "FINAL", "90:00"); break;
