@@ -14,3 +14,10 @@
 
 html { scroll-behavior: smooth; }
 body { background: var(--background); color: var(--foreground); font-family: var(--font-sans), system-ui, sans-serif; }
+
+/* Barra de matiz del selector de color */
+.hue-range { -webkit-appearance: none; appearance: none; height: 14px; border-radius: 9999px; outline: none;
+  background: linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%); }
+.hue-range::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 9999px; background: #fff; border: 3px solid #0f172a; box-shadow: 0 1px 4px rgb(0 0 0 / .4); cursor: pointer; }
+.hue-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 9999px; background: #fff; border: 3px solid #0f172a; box-shadow: 0 1px 4px rgb(0 0 0 / .4); cursor: pointer; }
+.hue-range:focus-visible::-webkit-slider-thumb { outline: 2px solid #059669; outline-offset: 2px; }

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { Division, Fixture, Goal, Team, Tournament, Venue } from "@/lib/types";
+import { sanitizeBrand, type BrandKind } from "@/lib/brand";
+import type { BrandRow, Division, Fixture, Goal, Team, Tournament, Venue } from "@/lib/types";
+import BrandEditor from "@/components/brand/BrandEditor";
 import CalendarTab from "./CalendarTab";
 import ImportTab from "./ImportTab";
 import DivisionsTab from "./DivisionsTab";
@@ -17,6 +19,7 @@ export type BoardData = {
   venues: Venue[];
   fixtures: Fixture[];
   goals: Goal[];
+  brands: BrandRow[];
 };
 
 const TABS = [
@@ -26,6 +29,8 @@ const TABS = [
   { id: "canchas", label: "Canchas" },
   { id: "calendario", label: "Calendario" },
   { id: "posiciones", label: "Posiciones y estadísticas" },
+  { id: "marca-torneo", label: "Marca del Torneo" },
+  { id: "marca-transmision", label: "Marca de Transmisión" },
   { id: "importar", label: "Importar con IA" },
 ] as const;
 
@@ -62,6 +67,22 @@ export default function Board(data: BoardData) {
         {tab === "calendario" && <CalendarTab {...data} />}
         {tab === "posiciones" && <StandingsTab {...data} />}
         {tab === "importar" && <ImportTab {...data} onDone={() => setTab("calendario")} />}
+        {/* Los editores de marca siguen montados al cambiar de pestaña para no perder cambios sin guardar. */}
+        {(["tournament", "broadcast"] as BrandKind[]).map((kind) => {
+          const row = data.brands.find((b) => b.kind === kind);
+          return (
+            <div key={kind} hidden={tab !== (kind === "tournament" ? "marca-torneo" : "marca-transmision")}>
+              <BrandEditor
+                tournamentId={data.tournament.id}
+                tournamentName={data.tournament.name}
+                kind={kind}
+                initial={sanitizeBrand(kind, row?.settings)}
+                initialLogoPath={row?.logo_path ?? null}
+                teamNames={data.teams.map((t) => t.name)}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );

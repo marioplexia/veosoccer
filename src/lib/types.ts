@@ -15,3 +15,4 @@ export type Fixture = {
   note: string | null;
 };
 export type Goal = { id: string; fixture_id: string; team_id: string; player_name: string; minute: number | null };
+export type BrandRow = { kind: "tournament" | "broadcast"; settings: unknown; logo_path: string | null };
