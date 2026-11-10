@@ -43,6 +43,7 @@ function TournamentPreview({ settings, logoUrl, name }: { settings: BrandSetting
         <Label>Portada de jornada</Label>
         <div className="relative aspect-video overflow-hidden rounded-2xl p-6 sm:p-8" style={{ background: `linear-gradient(120deg, ${c.primary}, ${c.secondary})` }}>
           <div className="absolute -right-10 -top-10 h-56 w-56 rounded-full opacity-30 blur-2xl" style={{ background: c.highlight }} aria-hidden />
+          <div className="absolute -bottom-12 right-16 h-44 w-44 rounded-full opacity-30 blur-2xl" style={{ background: c.extra }} aria-hidden />
           <div className="relative flex h-full flex-col justify-end">
             <p className="text-[clamp(1.4rem,5vw,2.6rem)] uppercase leading-[1.05]" style={{ ...fontStyle(f.heading), color: readableOn(c.primary) }}>
               {name}
@@ -69,6 +70,7 @@ function TournamentPreview({ settings, logoUrl, name }: { settings: BrandSetting
               <span className="rounded-full px-3 py-1 text-xs" style={{ ...fontStyle(f.body), background: c.primary, color: readableOn(c.primary) }}>Principal</span>
               <span className="rounded-full px-3 py-1 text-xs" style={{ ...fontStyle(f.body), background: c.accent, color: readableOn(c.accent) }}>Acento</span>
               <span className="rounded-full px-3 py-1 text-xs" style={{ ...fontStyle(f.body), background: c.highlight, color: readableOn(c.highlight) }}>Destacado</span>
+              <span className="rounded-full px-3 py-1 text-xs" style={{ ...fontStyle(f.body), background: c.extra, color: readableOn(c.extra) }}>Adicional</span>
             </div>
           </div>
         </div>
@@ -90,7 +92,7 @@ function TournamentPreview({ settings, logoUrl, name }: { settings: BrandSetting
 }
 
 const roleName: Record<string, string> = {
-  primary: "Principal", secondary: "Secundario", accent: "Acento", highlight: "Destacado", background: "Fondo", surface: "Superficie", text: "Texto",
+  primary: "Principal", secondary: "Secundario", accent: "Acento", highlight: "Destacado", extra: "Adicional", background: "Fondo", surface: "Superficie", text: "Texto",
 };
 
 function BroadcastPreview({ settings, logoUrl, teamNames }: { settings: BrandSettings; logoUrl: string | null; teamNames: string[] }) {

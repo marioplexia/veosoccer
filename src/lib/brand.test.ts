@@ -64,6 +64,18 @@ describe("sanitizeBrand", () => {
   });
 });
 
+describe("colores de marca del torneo", () => {
+  it("incluye cinco colores de marca y completa el quinto en marcas guardadas antes de que existiera", () => {
+    const marca = ROLES.tournament.filter((r) => r.group === "Marca").map((r) => r.key);
+    expect(marca).toEqual(["primary", "secondary", "accent", "highlight", "extra"]);
+    // Una marca guardada con solo los cuatro colores anteriores conserva sus valores y recibe el nuevo por defecto.
+    const b = sanitizeBrand("tournament", { colors: { primary: "#FF2882", secondary: "#FF6900", accent: "#EBFF00", highlight: "#00FF87" } });
+    expect(b.colors).toMatchObject({ primary: "#FF2882", secondary: "#FF6900", accent: "#EBFF00", highlight: "#00FF87" });
+    expect(b.colors.extra).toBe(DEFAULT_BRANDS.tournament.colors.extra);
+    expect(brandToCssVars("tournament", b)).toContain("--brand-extra: ");
+  });
+});
+
 describe("tipografías", () => {
   it("nearestWeight elige un peso existente", () => {
     expect(nearestWeight("Lato", 600)).toBe(700);

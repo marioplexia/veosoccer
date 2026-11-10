@@ -12,6 +12,7 @@ export const ROLES: Record<BrandKind, RoleDef[]> = {
     { key: "secondary", label: "Secundario", hint: "Segundo color de la degradación y fondos oscuros", group: "Marca" },
     { key: "accent", label: "Acento", hint: "Etiquetas, píldoras y detalles destacados", group: "Marca" },
     { key: "highlight", label: "Destacado", hint: "Resaltes y datos importantes", group: "Marca" },
+    { key: "extra", label: "Adicional", hint: "Quinto color de marca: fondos y detalles complementarios", group: "Marca" },
     { key: "background", label: "Fondo", hint: "Fondo general de las piezas claras", group: "Superficies" },
     { key: "surface", label: "Superficie", hint: "Tarjetas y paneles", group: "Superficies" },
     { key: "text", label: "Texto", hint: "Texto principal sobre fondo claro", group: "Superficies", pair: "surface" },
@@ -52,7 +53,7 @@ export const MAX_PALETTE = 24;
 
 export const DEFAULT_BRANDS: Record<BrandKind, BrandSettings> = {
   tournament: {
-    colors: { primary: "#059669", secondary: "#0F172A", accent: "#F59E0B", highlight: "#22D3EE", background: "#F8FAFC", surface: "#FFFFFF", text: "#0F172A" },
+    colors: { primary: "#059669", secondary: "#0F172A", accent: "#F59E0B", highlight: "#22D3EE", extra: "#8B5CF6", background: "#F8FAFC", surface: "#FFFFFF", text: "#0F172A" },
     palette: [
       { id: "verde", name: "Verde cancha", hex: "#059669" },
       { id: "noche", name: "Azul noche", hex: "#0F172A" },
