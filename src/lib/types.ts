@@ -1,6 +1,7 @@
 export type Tournament = { id: string; name: string; description: string | null; start_date: string | null };
 export type Division = { id: string; name: string; position: number };
-export type Team = { id: string; name: string; division_id: string };
+export type Team = { id: string; name: string; division_id: string; logo_path?: string | null };
+export type Player = { id: string; team_id: string; name: string; number: number | null; photo_path: string | null };
 export type Venue = { id: string; name: string };
 export type Fixture = {
   id: string;

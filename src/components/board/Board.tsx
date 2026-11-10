@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { sanitizeBrand, type BrandKind } from "@/lib/brand";
-import type { BrandRow, Division, Fixture, Goal, Team, Tournament, Venue } from "@/lib/types";
+import type { BrandRow, Division, Fixture, Goal, Player, Team, Tournament, Venue } from "@/lib/types";
 import BrandEditor from "@/components/brand/BrandEditor";
 import CalendarTab from "./CalendarTab";
 import ImportTab from "./ImportTab";
@@ -20,6 +20,7 @@ export type BoardData = {
   fixtures: Fixture[];
   goals: Goal[];
   brands: BrandRow[];
+  players: Player[];
 };
 
 const TABS = [
@@ -79,6 +80,8 @@ export default function Board(data: BoardData) {
                 initial={sanitizeBrand(kind, row?.settings)}
                 initialLogoPath={row?.logo_path ?? null}
                 teamNames={data.teams.map((t) => t.name)}
+                teams={data.teams}
+                players={data.players}
                 matches={data.fixtures.map((f) => {
                   const nm = (id: string) => data.teams.find((t) => t.id === id)?.name ?? "?";
                   const dv = data.divisions.find((d) => d.id === f.division_id)?.name;
@@ -86,6 +89,7 @@ export default function Board(data: BoardData) {
                     id: f.id,
                     label: `${data.divisions.length > 1 && dv ? `${dv} · ` : ""}J${f.round} · ${nm(f.home_team_id)} vs ${nm(f.away_team_id)}`,
                     home: nm(f.home_team_id), away: nm(f.away_team_id), homeScore: f.home_score ?? 0, awayScore: f.away_score ?? 0,
+                    homeTeamId: f.home_team_id, awayTeamId: f.away_team_id,
                   };
                 })}
               />

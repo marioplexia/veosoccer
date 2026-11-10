@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import Board from "@/components/board/Board";
 import { createClient } from "@/lib/supabase/server";
-import type { BrandRow, Division, Fixture, Goal, Team, Tournament, Venue } from "@/lib/types";
+import type { BrandRow, Division, Fixture, Goal, Player, Team, Tournament, Venue } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +19,13 @@ export default async function TournamentPage({ params }: { params: Promise<{ id:
   const { data: tournament } = await supabase.from("tournaments").select("id, name, description, start_date").eq("id", id).maybeSingle();
   if (!tournament) notFound();
 
-  const [divisions, teams, venues, fixtures, brands] = await Promise.all([
+  const [divisions, teams, venues, fixtures, brands, players] = await Promise.all([
     supabase.from("divisions").select("id, name, position").eq("tournament_id", id).order("position").order("created_at"),
-    supabase.from("tournament_teams").select("id, name, division_id").eq("tournament_id", id).order("name"),
+    supabase.from("tournament_teams").select("id, name, division_id, logo_path").eq("tournament_id", id).order("name"),
     supabase.from("venues").select("id, name").eq("tournament_id", id).order("name"),
     supabase.from("fixtures").select("id, division_id, round, home_team_id, away_team_id, venue_id, kickoff, home_score, away_score, note").eq("tournament_id", id).order("round").order("kickoff", { nullsFirst: false }),
     supabase.from("brands").select("kind, settings, logo_path").eq("tournament_id", id),
+    supabase.from("players").select("id, team_id, name, number, photo_path").eq("tournament_id", id).order("number", { nullsFirst: false }).order("name"),
   ]);
   const fixtureIds = (fixtures.data ?? []).map((f) => f.id);
   const goals = fixtureIds.length
@@ -43,6 +44,7 @@ export default async function TournamentPage({ params }: { params: Promise<{ id:
         fixtures={(fixtures.data ?? []) as Fixture[]}
         goals={(goals.data ?? []) as Goal[]}
         brands={(brands.data ?? []) as BrandRow[]}
+        players={(players.data ?? []) as Player[]}
       />
     </main>
   );

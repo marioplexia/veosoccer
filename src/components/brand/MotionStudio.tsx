@@ -5,8 +5,11 @@ import type { BrandKind, BrandSettings } from "@/lib/brand";
 import { DEFAULT_MATCH, FORMATIONS, FORMATS, TEMPLATES, drawScene, parseFormation, templateById, type FieldKey, type FormatId, type MatchData, type SceneId, type SceneImage } from "@/lib/motion/scenes";
 import { btnGhost, btnPrimary, Card, ErrorMsg, inputCls } from "@/components/ui";
 import { useGoogleFonts } from "./useGoogleFonts";
+import { mediaUrl } from "@/lib/media";
+import { createClient } from "@/lib/supabase/client";
+import type { Player, Team } from "@/lib/types";
 
-export type MatchOption = { id: string; label: string; home: string; away: string; homeScore: number; awayScore: number };
+export type MatchOption = { id: string; label: string; home: string; away: string; homeScore: number; awayScore: number; homeTeamId?: string; awayTeamId?: string };
 
 const MIME_CANDIDATES = ["video/mp4;codecs=avc1.640028", "video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
 const pickMime = () => (typeof MediaRecorder === "undefined" ? null : MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported(m)) ?? null);
@@ -42,8 +45,8 @@ function ImageButton({ text, has, onPick, onClear }: { text: string; has: boolea
 }
 
 export default function MotionStudio({
-  kind, settings, logoUrl, tournamentName, matches,
-}: { kind: BrandKind; settings: BrandSettings; logoUrl: string | null; tournamentName: string; matches: MatchOption[] }) {
+  kind, settings, logoUrl, tournamentName, matches, teams = [], players = [],
+}: { kind: BrandKind; settings: BrandSettings; logoUrl: string | null; tournamentName: string; matches: MatchOption[]; teams?: Team[]; players?: Player[] }) {
   const templates = useMemo(() => TEMPLATES.filter((t) => t.kind === kind), [kind]);
   const [id, setId] = useState<SceneId>(templates[0].id);
   const [format, setFormat] = useState<FormatId>("horizontal");
@@ -58,7 +61,8 @@ export default function MotionStudio({
   const [images, setImages] = useState<Record<string, LocalImage>>({});
   const imagesRef = useRef(images);
   imagesRef.current = images;
-  useEffect(() => () => { Object.values(imagesRef.current).forEach((x) => URL.revokeObjectURL(x.url)); }, []);
+  const revoke = (u: string) => { if (u.startsWith("blob:")) URL.revokeObjectURL(u); };
+  useEffect(() => () => { Object.values(imagesRef.current).forEach((x) => revoke(x.url)); }, []);
 
   function pickImage(key: string, file: File) {
     setError(null);
@@ -66,11 +70,54 @@ export default function MotionStudio({
     if (file.size > MAX_IMAGE) return setError("La imagen no puede pesar más de 8 MB.");
     const url = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => setImages((m) => { if (m[key]) URL.revokeObjectURL(m[key].url); return { ...m, [key]: { url, img, w: img.naturalWidth, h: img.naturalHeight } }; });
+    img.onload = () => setImages((m) => { if (m[key]) revoke(m[key].url); return { ...m, [key]: { url, img, w: img.naturalWidth, h: img.naturalHeight } }; });
     img.onerror = () => { URL.revokeObjectURL(url); setError("No se pudo leer esa imagen."); };
     img.src = url;
   }
-  const clearImage = (key: string) => setImages((m) => { if (m[key]) URL.revokeObjectURL(m[key].url); const n = { ...m }; delete n[key]; return n; });
+  const clearImage = (key: string) => setImages((m) => { if (!m[key]) return m; revoke(m[key].url); const n = { ...m }; delete n[key]; return n; });
+
+  // Imágenes guardadas en el torneo (escudos y fotos). crossOrigin para poder grabar el canvas.
+  const supabase = useMemo(() => createClient(), []);
+  function loadRemote(key: string, path: string | null | undefined) {
+    const url = mediaUrl(supabase, path);
+    if (!url) { clearImage(key); return; }
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => setImages((m) => { if (m[key]) revoke(m[key].url); return { ...m, [key]: { url, img, w: img.naturalWidth, h: img.naturalHeight } }; });
+    img.onerror = () => setError("No se pudo cargar una imagen guardada del torneo.");
+    img.src = url;
+  }
+  const teamById = (tid: string | undefined) => teams.find((x) => x.id === tid);
+  function applyTeam(side: "home" | "away", tid: string) {
+    const tm = teamById(tid);
+    if (!tm) return;
+    set(side, tm.name);
+    loadRemote(side === "home" ? "homeLogo" : "awayLogo", tm.logo_path);
+  }
+  function applyPlayerAward(pid: string) {
+    const pl = players.find((x) => x.id === pid);
+    if (!pl) return;
+    set("player", pl.name);
+    loadRemote("photo", pl.photo_path);
+    loadRemote("teamLogo", teamById(pl.team_id)?.logo_path);
+  }
+  function applyPlayerCard(k: number, pid: string) {
+    const pl = players.find((x) => x.id === pid);
+    if (!pl) return;
+    setData((d) => ({ ...d, players: d.players.map((x, j) => (j === k ? { ...x, name: pl.name } : x)) }));
+    loadRemote(`p${k}`, pl.photo_path);
+  }
+  const playerLabel = (pl: Player) => `${pl.number != null ? `${pl.number} · ` : ""}${pl.name} — ${teamById(pl.team_id)?.name ?? ""}`;
+  const playerSelect = (aria: string, onPick: (id: string) => void, cls = "") => players.length > 0 && (
+    <select aria-label={aria} className={`${inputCls} ${cls}`} value="" onChange={(e) => { if (e.target.value) onPick(e.target.value); }}>
+      <option value="">{aria}…</option>
+      {teams.filter((tm) => players.some((pl) => pl.team_id === tm.id)).map((tm) => (
+        <optgroup key={tm.id} label={tm.name}>
+          {players.filter((pl) => pl.team_id === tm.id).map((pl) => <option key={pl.id} value={pl.id}>{playerLabel(pl)}</option>)}
+        </optgroup>
+      ))}
+    </select>
+  );
   const imgBtn = (key: string, text: string) => <ImageButton text={text} has={!!images[key]} onPick={(f) => pickImage(key, f)} onClear={() => clearImage(key)} />;
 
   const tpl = templateById(id);
@@ -142,7 +189,10 @@ export default function MotionStudio({
 
   function pickMatch(mid: string) {
     const m = matches.find((x) => x.id === mid);
-    if (m) setData((d) => ({ ...d, home: m.home, away: m.away, homeScore: m.homeScore, awayScore: m.awayScore }));
+    if (!m) return;
+    setData((d) => ({ ...d, home: m.home, away: m.away, homeScore: m.homeScore, awayScore: m.awayScore }));
+    loadRemote("homeLogo", teamById(m.homeTeamId)?.logo_path);
+    loadRemote("awayLogo", teamById(m.awayTeamId)?.logo_path);
   }
 
   // Se detecta tras montar (en el servidor no existe MediaRecorder) para no desajustar el HTML.
@@ -254,6 +304,16 @@ export default function MotionStudio({
               </select>
             </label>
           )}
+          {(has("homeLogo") || has("awayLogo")) && teams.length > 0 && (
+            <div className="grid grid-cols-2 gap-2">
+              {(["home", "away"] as const).map((side) => (
+                <select key={side} aria-label={side === "home" ? "Elegir equipo local" : "Elegir equipo visitante"} className={inputCls} value="" onChange={(e) => applyTeam(side, e.target.value)}>
+                  <option value="">{side === "home" ? "Equipo local…" : "Equipo visitante…"}</option>
+                  {teams.map((tm) => <option key={tm.id} value={tm.id}>{tm.name}{tm.logo_path ? "" : " (sin escudo)"}</option>)}
+                </select>
+              ))}
+            </div>
+          )}
           {(has("homeLogo") || has("awayLogo")) && (
             <div className="flex flex-wrap gap-2">
               {has("homeLogo") && imgBtn("homeLogo", "Escudo local")}
@@ -269,6 +329,7 @@ export default function MotionStudio({
           {has("minute") && <label className={label}>Minuto<input type="number" min={0} max={150} className={`${inputCls} mt-1`} value={data.minute} onChange={(e) => set("minute", num(e.target.value, 0, 150))} /></label>}
           {has("round") && <label className={label}>Jornada<input type="number" min={1} max={99} className={`${inputCls} mt-1`} value={data.round} onChange={(e) => set("round", num(e.target.value, 1, 99))} /></label>}
           {has("subtitle") && <label className={label}>Texto (fecha u horario)<input className={`${inputCls} mt-1`} value={data.subtitle} maxLength={60} onChange={(e) => set("subtitle", e.target.value)} /></label>}
+          {has("photo") && playerSelect("Elegir jugador del torneo", applyPlayerAward, "")}
           {(has("photo") || has("teamLogo")) && (
             <div className="flex flex-wrap gap-2">
               {has("photo") && imgBtn("photo", "Foto del jugador")}
@@ -302,12 +363,17 @@ export default function MotionStudio({
                     aria-label={`Nombre del jugador ${k + 1}`}
                   />
                   {imgBtn(`p${k}`, "Foto")}
+                  {playerSelect(`Elegir jugador ${k + 1}`, (pid) => applyPlayerCard(k, pid), "w-28! shrink-0")}
                 </div>
               ))}
             </fieldset>
           )}
           {(has("homeLogo") || has("photo") || has("players")) && (
-            <p className="text-xs text-slate-500">Las imágenes se usan solo en este dispositivo para armar la pieza; no se guardan en el torneo.</p>
+            <p className="text-xs text-slate-500">
+              {teams.some((tm) => tm.logo_path) || players.length
+                ? "Los escudos y fotos guardados en Equipos se cargan solos. Las imágenes que subas aquí solo se usan en esta pieza."
+                : "Consejo: sube escudos y plantillas en la pestaña Equipos y aquí se cargarán solos."}
+            </p>
           )}
           {tpl.fields.length === 0 && <p className="text-sm text-slate-500">Esta animación no necesita datos: usa tu logo y los colores de la marca.</p>}
         </div>
