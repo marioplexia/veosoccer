@@ -82,6 +82,8 @@ export default function Board(data: BoardData) {
                 teamNames={data.teams.map((t) => t.name)}
                 teams={data.teams}
                 players={data.players}
+                fixtures={data.fixtures}
+                divisions={data.divisions}
                 matches={data.fixtures.map((f) => {
                   const nm = (id: string) => data.teams.find((t) => t.id === id)?.name ?? "?";
                   const dv = data.divisions.find((d) => d.id === f.division_id)?.name;

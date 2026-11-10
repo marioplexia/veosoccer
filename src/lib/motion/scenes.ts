@@ -15,7 +15,15 @@ export type MatchData = {
   teamTitle: string; awardTitle: string; label: string;
   formation: string;
   players: PlayerCard[];
+  tableTitle: string;
+  results: ResultRow[];
+  standings: StandRow[];
 };
+
+/** Renglón de resultados. homeCrest/awayCrest son claves de `images` (escudos). */
+export type ResultRow = { home: string; away: string; homeScore: number | null; awayScore: number | null; homeCrest?: string; awayCrest?: string };
+export type StandRow = { pos: number; team: string; played: number; gd: number; points: number; crest?: string };
+export const MAX_TABLE_ROWS = 20;
 
 export type PlayerCard = { name: string; color: string };
 export type SceneImage = { img: CanvasImageSource; w: number; h: number };
@@ -35,10 +43,18 @@ export const DEFAULT_MATCH: MatchData = {
   player: "Nombre Apellido", minute: 34, playerOut: "Jugador Sale", playerIn: "Jugador Entra", round: 6, subtitle: "Domingo 8 de noviembre",
   teamTitle: "Equipo ideal de la jornada", awardTitle: "Jugador de la jornada", label: "Ganador", formation: "4-3-3",
   players: Array.from({ length: 11 }, (_, k) => ({ name: `Jugador ${k + 1}`, color: CARD_COLORS[k % CARD_COLORS.length] })),
+  tableTitle: "Jornada 6",
+  results: [
+    ["Leones", "Tigres", 5, 0], ["Águilas", "Halcones", 2, 1], ["Lobos", "Toros", 1, 0], ["Búhos", "Pumas", 4, 4], ["Cóndores", "Jaguares", 1, 0],
+    ["Delfines", "Osos", 1, 1], ["Zorros", "Panteras", 1, 1], ["Coyotes", "Linces", 1, 0], ["Venados", "Gallos", 2, 1], ["Potros", "Rayos", 1, 4],
+  ].map(([home, away, hs, as]) => ({ home: home as string, away: away as string, homeScore: hs as number, awayScore: as as number })),
+  standings: ["Leones", "Águilas", "Lobos", "Búhos", "Cóndores", "Delfines", "Zorros", "Coyotes", "Venados", "Potros"].map((team, k) => ({
+    pos: k + 1, team, played: 6, gd: 12 - k * 3, points: 16 - k * 1 - (k > 4 ? 2 : 0),
+  })),
 };
 
-export type SceneId = "ident" | "matchday" | "matchup" | "totw" | "potw" | "goal" | "halftime" | "fulltime" | "kickoff" | "yellow" | "red" | "substitution";
-export type FieldKey = "match" | "home" | "away" | "homeScore" | "awayScore" | "side" | "player" | "minute" | "playerOut" | "playerIn" | "round" | "subtitle" | "homeLogo" | "awayLogo" | "teamLogo" | "photo" | "teamTitle" | "awardTitle" | "label" | "formation" | "players";
+export type SceneId = "ident" | "matchday" | "matchup" | "totw" | "potw" | "results" | "standings" | "goal" | "halftime" | "fulltime" | "kickoff" | "yellow" | "red" | "substitution";
+export type FieldKey = "match" | "home" | "away" | "homeScore" | "awayScore" | "side" | "player" | "minute" | "playerOut" | "playerIn" | "round" | "subtitle" | "homeLogo" | "awayLogo" | "teamLogo" | "photo" | "teamTitle" | "awardTitle" | "label" | "formation" | "players" | "resultsPick" | "standingsPick" | "tableTitle" | "background";
 
 export type TemplateDef = { id: SceneId; kind: BrandKind; label: string; description: string; duration: number; fields: FieldKey[]; format?: FormatId; poster?: number };
 
@@ -48,6 +64,8 @@ export const TEMPLATES: TemplateDef[] = [
   { id: "matchup", kind: "tournament", label: "Presentación de partido", description: "Los dos escudos con tu logo al centro, el partido y la fecha.", duration: 5, fields: ["match", "home", "away", "homeLogo", "awayLogo", "subtitle"], poster: 3.5 },
   { id: "totw", kind: "tournament", label: "Equipo ideal", description: "Cancha con las tarjetas de los jugadores en su formación.", duration: 5, fields: ["teamTitle", "round", "formation", "players"], format: "portrait", poster: 4 },
   { id: "potw", kind: "tournament", label: "Jugador de la jornada", description: "Foto y nombre del jugador destacado.", duration: 5, fields: ["awardTitle", "label", "round", "player", "photo", "teamLogo"], format: "portrait", poster: 4 },
+  { id: "results", kind: "tournament", label: "Resultados de la jornada", description: "Lista de resultados con escudos; sale con barrido de color y deja ver tu foto de fondo.", duration: 10, fields: ["resultsPick", "tableTitle", "background"], poster: 5 },
+  { id: "standings", kind: "tournament", label: "Tabla de posiciones", description: "Tabla con escudos y puntos, con el mismo movimiento que los resultados.", duration: 10, fields: ["standingsPick", "tableTitle", "background"], poster: 5 },
   { id: "goal", kind: "broadcast", label: "Gol", description: "¡GOL! con el goleador, el minuto y el marcador actualizado.", duration: 5.2, fields: ["match", "home", "away", "homeScore", "awayScore", "side", "player", "minute"] },
   { id: "halftime", kind: "broadcast", label: "Medio tiempo", description: "Resultado al descanso.", duration: 5, fields: ["match", "home", "away", "homeScore", "awayScore"] },
   { id: "fulltime", kind: "broadcast", label: "Final del partido", description: "Resultado final.", duration: 5, fields: ["match", "home", "away", "homeScore", "awayScore"] },
@@ -601,6 +619,14 @@ function sceneSubstitution(ctx: Ctx, i: SceneInput) {
   ctx.restore();
 }
 
+/** Iniciales para el respaldo del logo: "Liga Municipal de Fútbol" -> "LMF" (máx. 3). */
+export function initials(name: string): string {
+  const skip = new Set(["de", "del", "la", "las", "el", "los", "y"]);
+  const words = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^A-Za-z0-9]+/).filter((w) => w && !skip.has(w.toLowerCase()));
+  const s = words.slice(0, 3).map((w) => w[0].toUpperCase()).join("");
+  return s || "•";
+}
+
 /* ───────────── carteles: partido, equipo ideal, jugador de la jornada ───────────── */
 
 const appear = (t: number, k: number) => easeOutCubic(progress(t, 0.15 + k * 0.12, 0.65 + k * 0.12));
@@ -673,8 +699,12 @@ function leagueLogo(ctx: Ctx, i: SceneInput, cx: number, cy: number, size: numbe
   ctx.save();
   ctx.shadowColor = "rgba(255,255,255,.95)"; ctx.shadowBlur = 24 * u;
   if (!drawLogo(ctx, i, cx, cy, size, size)) {
+    // Sin logo: círculo de marca con las iniciales del torneo ("Liga Municipal" -> "LM").
+    ctx.fillStyle = inkOf(i);
+    ctx.beginPath(); ctx.arc(cx, cy, size * 0.42, 0, Math.PI * 2); ctx.fill();
     ctx.shadowColor = "transparent";
-    text(ctx, abbreviation(i.tournamentName, "•"), cx, cy, i.fonts.heading, size * 0.5, inkOf(i), { stroke: "#FFFFFF", strokeW: 14 * u });
+    ctx.lineWidth = Math.max(3, size * 0.045); ctx.strokeStyle = "#FFFFFF"; ctx.stroke();
+    text(ctx, initials(i.tournamentName), cx, cy, i.fonts.heading, size * 0.3, "#FFFFFF", { maxW: size * 0.62 });
   }
   ctx.restore();
 }
@@ -902,6 +932,210 @@ function scenePotw(ctx: Ctx, i: SceneInput) {
   ctx.restore();
 }
 
+/* ───────────── tabla animada (resultados / posiciones), 10 s ───────────── */
+
+export const TABLE_T = { panelIn: 0.6, rowsAt: 0.75, rowStep: 0.11, spotFrom: 2.4, spotTo: 7.2, exitAt: 7.4, logoOut: 8.15, expandAt: 8.5, revealAt: 9.15, D: 10 };
+
+function crest(ctx: Ctx, i: SceneInput, key: string | undefined, name: string, cx: number, cy: number, size: number) {
+  const im = key ? i.images?.[key] : undefined;
+  if (im) { contain(ctx, im, cx, cy, size, size); return; }
+  ctx.save();
+  ctx.fillStyle = inkOf(i);
+  ctx.beginPath(); ctx.arc(cx, cy, size * 0.45, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  text(ctx, abbreviation(name, "?").slice(0, 2), cx, cy, i.fonts.heading, size * 0.38, "#FFFFFF");
+}
+
+/** Estado del panel de color durante la salida: 0 normal, 1 cubre toda la pantalla. */
+function tableLayout(i: SceneInput) {
+  const { w, h } = i;
+  const horizontal = w >= h;
+  const u = Math.min(w, h) / 1080;
+  return horizontal
+    ? { horizontal, u, panel: { x: 0, y: 0, w: w * 0.16, h }, list: { x: w * 0.22, y: h * 0.08, w: w * 0.52, h: h * 0.86 }, strip: { x: w * 0.79, y: 0, w: w * 0.21, h }, logo: { x: w * 0.16, y: h * 0.52, s: Math.min(h * 0.4, w * 0.16) } }
+    : { horizontal, u, panel: { x: 0, y: 0, w, h: h * 0.14 }, list: { x: w * 0.06, y: h * 0.19, w: w * 0.88, h: h * 0.68 }, strip: { x: 0, y: h * 0.89, w, h: h * 0.11 }, logo: { x: w / 2, y: h * 0.14, s: Math.min(w * 0.3, h * 0.13) } };
+}
+
+function tableScene(ctx: Ctx, i: SceneInput, title: string, n: number, header: ((x: number, y: number, rh: number) => void) | null, drawRow: (k: number, x: number, y: number, rw: number, rh: number) => void) {
+  const { w, h, t } = i;
+  const T = TABLE_T;
+  const L = tableLayout(i);
+  const { u } = L;
+  const ink = inkOf(i);
+  const bg = i.images?.background;
+
+  ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
+  shards(ctx, w, h, t, ink, 0.025);
+
+  // franja con la foto de fondo
+  const stripIn = easeOutCubic(progress(t, 0.5, 1.1));
+  ctx.save();
+  if (L.horizontal) ctx.translate((1 - stripIn) * L.strip.w, 0); else ctx.translate(0, (1 - stripIn) * L.strip.h);
+  rr(ctx, L.strip.x, L.strip.y, L.strip.w, L.strip.h, L.horizontal ? 0 : 0);
+  ctx.clip();
+  if (bg) cover(ctx, bg, L.strip.x, L.strip.y, L.strip.w, L.strip.h);
+  else { ctx.fillStyle = brandGradient(ctx, i, L.strip.x, L.strip.y, L.strip.x + L.strip.w, L.strip.y + L.strip.h); ctx.fillRect(L.strip.x, L.strip.y, L.strip.w, L.strip.h); shards(ctx, w, h, t * 1.3, "#FFFFFF", 0.14); }
+  ctx.restore();
+
+  // encabezado
+  const headA = easeOutCubic(progress(t, 0.45, 0.95)) * (1 - easeInCubic(progress(t, T.exitAt + 0.5, T.exitAt + 0.9)));
+  const count = Math.max(0, Math.min(n, MAX_TABLE_ROWS));
+  const n2 = Math.max(1, count); // para medir; con 0 renglones no se dibuja ninguno
+  const headH = 70 * u;
+  const colH = header ? 46 * u : 0;
+  const rh = Math.min(84 * u, (L.list.h - headH - colH) / n2);
+  const listH = headH + colH + rh * n2;
+  const top = L.list.y + (L.list.h - listH) / 2;
+  ctx.save(); ctx.globalAlpha = headA;
+  ctx.font = fontStr(i.fonts.heading, 30 * u);
+  const nameW = ctx.measureText(i.tournamentName).width;
+  ctx.font = fontStr(i.fonts.body, 30 * u);
+  const titleW = ctx.measureText(title).width;
+  const hx = L.list.x + L.list.w / 2 - (nameW + 14 * u + titleW) / 2;
+  text(ctx, i.tournamentName, hx, top + headH / 2, i.fonts.heading, 30 * u, ink, { align: "left" });
+  text(ctx, title, hx + nameW + 14 * u, top + headH / 2, i.fonts.body, 30 * u, ink, { align: "left" });
+  if (header) header(L.list.x, top + headH + colH / 2, colH);
+  ctx.restore();
+
+  // renglones: entran escalonados, un resaltado recorre la lista, y salen de abajo hacia arriba
+  const y0 = top + headH + colH;
+  const spotSpan = (T.spotTo - T.spotFrom) / n2;
+  for (let k = 0; k < count; k++) {
+    const inP = easeOutCubic(progress(t, T.rowsAt + k * T.rowStep, T.rowsAt + k * T.rowStep + 0.45));
+    const outStart = T.exitAt + (n2 - 1 - k) * Math.min(0.06, 0.7 / n2);
+    const outP = easeInCubic(progress(t, outStart, outStart + 0.22));
+    if (inP <= 0 || outP >= 1) continue;
+    const y = y0 + k * rh;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(L.list.x - 20 * u, y, L.list.w + 40 * u, rh * (1 - outP)); ctx.clip();
+    ctx.globalAlpha = inP;
+    ctx.translate(0, (1 - inP) * rh * 0.6);
+    // resaltado
+    const sp = progress(t, T.spotFrom + k * spotSpan, T.spotFrom + (k + 1.4) * spotSpan);
+    const glow = Math.sin(Math.PI * sp);
+    if (glow > 0.01) {
+      ctx.save(); ctx.globalAlpha = inP * 0.16 * glow;
+      ctx.fillStyle = brandGradient(ctx, i, L.list.x, 0, L.list.x + L.list.w, 0);
+      rr(ctx, L.list.x - 10 * u, y + rh * 0.08, L.list.w + 20 * u, rh * 0.84, 12 * u); ctx.fill();
+      ctx.restore();
+    }
+    ctx.strokeStyle = "rgba(15,23,42,.08)"; ctx.lineWidth = 2 * u;
+    ctx.beginPath(); ctx.moveTo(L.list.x, y + rh); ctx.lineTo(L.list.x + L.list.w, y + rh); ctx.stroke();
+    drawRow(k, L.list.x, y, L.list.w, rh);
+    ctx.restore();
+  }
+
+  // panel de color: entra, se mantiene; en la salida se expande hasta cubrir y se retira
+  const pal = washPalette("tournament", i.kind === "tournament" ? i.colors : { ...i.colors, primary: i.colors.homeStripe, secondary: i.colors.awayStripe, accent: i.colors.clockBg, highlight: i.colors.lowerAccent, extra: i.colors.scoreBg });
+  const inK = easeOutCubic(progress(t, 0, T.panelIn));
+  const expand = easeInOutCubic(progress(t, T.expandAt, T.revealAt));
+  const leave = easeInOutCubic(progress(t, T.revealAt, T.D - 0.15));
+  const R = 70 * u;
+  let px: number, py: number, pw: number, ph: number;
+  if (L.horizontal) {
+    const baseW = L.panel.w * inK;
+    const right = lerp(baseW, w + R, expand);
+    px = lerp(0, w + R, leave); py = 0; pw = Math.max(0, right - px); ph = h;
+  } else {
+    const baseH = L.panel.h * inK;
+    const bottom = lerp(baseH, h + R, expand);
+    px = 0; py = lerp(0, h + R, leave); pw = w; ph = Math.max(0, bottom - py);
+  }
+  if (t >= T.revealAt && bg) {
+    // la foto completa aparece debajo del panel que se retira
+    ctx.save();
+    if (L.horizontal) { ctx.beginPath(); ctx.rect(0, 0, px + R, h); ctx.clip(); } else { ctx.beginPath(); ctx.rect(0, 0, w, py + R); ctx.clip(); }
+    cover(ctx, bg, 0, 0, w, h);
+    ctx.restore();
+  } else if (t >= T.revealAt) {
+    ctx.save();
+    if (L.horizontal) { ctx.beginPath(); ctx.rect(0, 0, px + R, h); ctx.clip(); } else { ctx.beginPath(); ctx.rect(0, 0, w, py + R); ctx.clip(); }
+    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
+    leagueLogo(ctx, i, w / 2, h / 2, Math.min(w, h) * 0.35 * easeOutBack(progress(t, T.revealAt + 0.2, T.D - 0.1)));
+    ctx.restore();
+  }
+  if (pw > 0 && ph > 0) {
+    ctx.save();
+    ctx.beginPath();
+    if (L.horizontal) {
+      ctx.moveTo(px, py); ctx.lineTo(px + pw - R, py); ctx.arcTo(px + pw, py, px + pw, py + R, R); ctx.lineTo(px + pw, py + ph); ctx.lineTo(px, py + ph);
+    } else {
+      ctx.moveTo(px, py); ctx.lineTo(px + pw, py); ctx.lineTo(px + pw, py + ph - R); ctx.arcTo(px + pw, py + ph, px + pw - R, py + ph, R); ctx.lineTo(px, py + ph);
+    }
+    ctx.closePath(); ctx.clip();
+    const ph0 = t * 0.1;
+    const g = L.horizontal ? ctx.createLinearGradient(0, 0, Math.max(L.panel.w, pw) * 0.6, h) : ctx.createLinearGradient(0, 0, w, Math.max(L.panel.h, ph));
+    const ca = samplePalette(pal, ph0), cb = samplePalette(pal, ph0 + 1);
+    g.addColorStop(0, ca); g.addColorStop(0.5, vividMid(ca, cb)); g.addColorStop(1, cb);
+    ctx.fillStyle = g; ctx.fillRect(px, py, pw, ph);
+    shards(ctx, w, h, t * 1.4, cb, 0.25);
+    ctx.restore();
+  }
+
+  // logo sobre el borde del panel; se encoge y desaparece al salir
+  const logoIn = easeOutBack(progress(t, 0.25, 0.85));
+  if (logoIn > 0.01 && t < T.logoOut + 0.5) {
+    const lp = L.horizontal ? { x: L.panel.w * inK, y: L.logo.y } : { x: L.logo.x, y: L.panel.h * inK };
+    const spin = t >= T.logoOut ? progress(t, T.logoOut, T.logoOut + 0.45) : -1;
+    ctx.save();
+    ctx.translate(lp.x, lp.y); ctx.scale(logoIn, logoIn); ctx.translate(-lp.x, -lp.y);
+    if (spin >= 0) spinLogo(ctx, i, lp.x, lp.y, L.logo.s, L.logo.s, spin, true);
+    else leagueLogo(ctx, i, lp.x, lp.y, L.logo.s);
+    ctx.restore();
+  }
+}
+
+function sceneResults(ctx: Ctx, i: SceneInput) {
+  const rows = i.data.results.slice(0, MAX_TABLE_ROWS);
+  const ink = inkOf(i);
+  tableScene(ctx, i, i.data.tableTitle, rows.length, null, (k, x, y, rw, rh) => {
+    const r = rows[k];
+    const cy = y + rh / 2;
+    const mid = x + rw / 2;
+    const cs = rh * 0.62;
+    const px = Math.min(rh * 0.4, 36 * (Math.min(i.w, i.h) / 1080));
+    const scoreW = rh * 1.5;
+    text(ctx, r.home, mid - scoreW / 2 - cs - rh * 0.3, cy, i.fonts.heading, px, ink, { align: "right", maxW: rw / 2 - scoreW / 2 - cs - rh * 0.4 });
+    crest(ctx, i, r.homeCrest, r.home, mid - scoreW / 2 - cs / 2 - rh * 0.12, cy, cs);
+    const score = r.homeScore != null && r.awayScore != null ? `${r.homeScore}-${r.awayScore}` : "vs";
+    text(ctx, score, mid, cy, i.fonts.numbers, px * 1.05, ink, { maxW: scoreW * 0.9 });
+    crest(ctx, i, r.awayCrest, r.away, mid + scoreW / 2 + cs / 2 + rh * 0.12, cy, cs);
+    text(ctx, r.away, mid + scoreW / 2 + cs + rh * 0.3, cy, i.fonts.heading, px, ink, { align: "left", maxW: rw / 2 - scoreW / 2 - cs - rh * 0.4 });
+  });
+}
+
+function sceneStandings(ctx: Ctx, i: SceneInput) {
+  const rows = i.data.standings.slice(0, MAX_TABLE_ROWS);
+  const ink = inkOf(i);
+  const u = Math.min(i.w, i.h) / 1080;
+  const cols = (x: number, rw: number) => ({ pos: x + rw * 0.05, crest: x + rw * 0.13, name: x + rw * 0.19, pj: x + rw * 0.7, dg: x + rw * 0.81, pts: x + rw * 0.93 });
+  tableScene(ctx, i, i.data.tableTitle, rows.length,
+    (x, cy) => {
+      const L = tableLayout(i);
+      const c = cols(x, L.list.w);
+      const px = 24 * u;
+      text(ctx, "PJ", c.pj, cy, i.fonts.body, px, ink, { alpha: 0.6 });
+      text(ctx, "DG", c.dg, cy, i.fonts.body, px, ink, { alpha: 0.6 });
+      text(ctx, "PTS", c.pts, cy, i.fonts.heading, px, ink, { alpha: 0.8 });
+    },
+    (k, x, y, rw, rh) => {
+      const r = rows[k];
+      const c = cols(x, rw);
+      const cy = y + rh / 2;
+      const px = Math.min(rh * 0.4, 36 * u);
+      if (k < 1) {
+        ctx.save(); ctx.fillStyle = brandGradient(ctx, i, x, 0, x + rw * 0.1, 0);
+        rr(ctx, c.pos - rh * 0.32, cy - rh * 0.32, rh * 0.64, rh * 0.64, rh * 0.14); ctx.fill(); ctx.restore();
+      }
+      text(ctx, String(r.pos), c.pos, cy, i.fonts.numbers, px, ink);
+      crest(ctx, i, r.crest, r.team, c.crest, cy, rh * 0.62);
+      text(ctx, r.team, c.name, cy, i.fonts.heading, px, ink, { align: "left", maxW: c.pj - c.name - rh * 0.6 });
+      text(ctx, String(r.played), c.pj, cy, i.fonts.numbers, px, ink);
+      text(ctx, r.gd > 0 ? `+${r.gd}` : String(r.gd), c.dg, cy, i.fonts.numbers, px, ink);
+      text(ctx, String(r.points), c.pts, cy, i.fonts.numbers, px * 1.1, ink);
+    });
+}
+
 export function drawScene(ctx: Ctx, id: SceneId, input: SceneInput) {
   ctx.save();
   ctx.clearRect(0, 0, input.w, input.h);
@@ -911,6 +1145,8 @@ export function drawScene(ctx: Ctx, id: SceneId, input: SceneInput) {
     case "matchup": sceneMatchup(ctx, input); break;
     case "totw": sceneTotw(ctx, input); break;
     case "potw": scenePotw(ctx, input); break;
+    case "results": sceneResults(ctx, input); break;
+    case "standings": sceneStandings(ctx, input); break;
     case "goal": sceneGoal(ctx, input); break;
     case "halftime": sceneResult(ctx, input, "MEDIO TIEMPO", "45:00"); break;
     case "fulltime": sceneResult(ctx, input, "FINAL", "90:00"); break;

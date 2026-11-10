@@ -7,7 +7,8 @@ import { btnGhost, btnPrimary, Card, ErrorMsg, inputCls } from "@/components/ui"
 import { useGoogleFonts } from "./useGoogleFonts";
 import { mediaUrl } from "@/lib/media";
 import { createClient } from "@/lib/supabase/client";
-import type { Player, Team } from "@/lib/types";
+import type { Division, Fixture, Player, Team } from "@/lib/types";
+import { computeStandings } from "@/lib/standings";
 
 export type MatchOption = { id: string; label: string; home: string; away: string; homeScore: number; awayScore: number; homeTeamId?: string; awayTeamId?: string };
 
@@ -45,8 +46,8 @@ function ImageButton({ text, has, onPick, onClear }: { text: string; has: boolea
 }
 
 export default function MotionStudio({
-  kind, settings, logoUrl, tournamentName, matches, teams = [], players = [],
-}: { kind: BrandKind; settings: BrandSettings; logoUrl: string | null; tournamentName: string; matches: MatchOption[]; teams?: Team[]; players?: Player[] }) {
+  kind, settings, logoUrl, tournamentName, matches, teams = [], players = [], fixtures = [], divisions = [],
+}: { kind: BrandKind; settings: BrandSettings; logoUrl: string | null; tournamentName: string; matches: MatchOption[]; teams?: Team[]; players?: Player[]; fixtures?: Fixture[]; divisions?: Division[] }) {
   const templates = useMemo(() => TEMPLATES.filter((t) => t.kind === kind), [kind]);
   const [id, setId] = useState<SceneId>(templates[0].id);
   const [format, setFormat] = useState<FormatId>("horizontal");
@@ -107,6 +108,42 @@ export default function MotionStudio({
     setData((d) => ({ ...d, players: d.players.map((x, j) => (j === k ? { ...x, name: pl.name } : x)) }));
     loadRemote(`p${k}`, pl.photo_path);
   }
+  // Tablas: jornadas disponibles (por división) y tabla de posiciones calculada.
+  const multiDiv = divisions.length > 1;
+  const divName = (id: string) => divisions.find((d) => d.id === id)?.name ?? "";
+  const roundOptions = [...new Map(fixtures.map((f) => [`${f.division_id}|${f.round}`, f])).values()]
+    .sort((a, b) => (divisions.findIndex((d) => d.id === a.division_id) - divisions.findIndex((d) => d.id === b.division_id)) || a.round - b.round)
+    .map((f) => ({ key: `${f.division_id}|${f.round}`, label: `${multiDiv ? `${divName(f.division_id)} · ` : ""}Jornada ${f.round}` }));
+  const crestKey = (tid: string) => `crest:${tid}`;
+  function loadCrests(ids: string[]) {
+    for (const tid of new Set(ids)) { const tm = teamById(tid); if (tm?.logo_path) loadRemote(crestKey(tid), tm.logo_path); }
+  }
+  function applyRound(key: string) {
+    const [div, round] = key.split("|");
+    const fx = fixtures.filter((f) => f.division_id === div && f.round === Number(round))
+      .sort((a, b) => (a.kickoff ?? "").localeCompare(b.kickoff ?? ""));
+    const nm = (tid: string) => teamById(tid)?.name ?? "?";
+    setData((d) => ({
+      ...d,
+      tableTitle: `${multiDiv ? `${divName(div)} · ` : ""}Jornada ${round}`,
+      results: fx.map((f) => ({
+        home: nm(f.home_team_id), away: nm(f.away_team_id), homeScore: f.home_score, awayScore: f.away_score,
+        homeCrest: crestKey(f.home_team_id), awayCrest: crestKey(f.away_team_id),
+      })),
+    }));
+    loadCrests(fx.flatMap((f) => [f.home_team_id, f.away_team_id]));
+  }
+  function applyStandings(div: string) {
+    const tms = teams.filter((x) => x.division_id === div);
+    const rows = computeStandings(tms, fixtures.filter((f) => f.division_id === div));
+    setData((d) => ({
+      ...d,
+      tableTitle: multiDiv ? `Tabla · ${divName(div)}` : "Tabla de posiciones",
+      standings: rows.map((r, k) => ({ pos: k + 1, team: r.name, played: r.played, gd: r.gd, points: r.points, crest: crestKey(r.teamId) })),
+    }));
+    loadCrests(rows.map((r) => r.teamId));
+  }
+
   const playerLabel = (pl: Player) => `${pl.number != null ? `${pl.number} · ` : ""}${pl.name} — ${teamById(pl.team_id)?.name ?? ""}`;
   const playerSelect = (aria: string, onPick: (id: string) => void, cls = "") => players.length > 0 && (
     <select aria-label={aria} className={`${inputCls} ${cls}`} value="" onChange={(e) => { if (e.target.value) onPick(e.target.value); }}>
@@ -374,6 +411,32 @@ export default function MotionStudio({
                 ? "Los escudos y fotos guardados en Equipos se cargan solos. Las imágenes que subas aquí solo se usan en esta pieza."
                 : "Consejo: sube escudos y plantillas en la pestaña Equipos y aquí se cargarán solos."}
             </p>
+          )}
+          {has("resultsPick") && (roundOptions.length > 0 ? (
+            <label className={label}>Jornada del calendario
+              <select className={`${inputCls} mt-1`} defaultValue="" onChange={(e) => e.target.value && applyRound(e.target.value)}>
+                <option value="">Elegir jornada…</option>
+                {roundOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+            </label>
+          ) : <p className="text-sm text-slate-500">Aún no hay partidos en el calendario; se muestran resultados de ejemplo.</p>)}
+          {has("standingsPick") && (divisions.length > 0 && teams.length > 0 ? (
+            <label className={label}>División
+              <select className={`${inputCls} mt-1`} defaultValue="" onChange={(e) => e.target.value && applyStandings(e.target.value)}>
+                <option value="">Elegir división…</option>
+                {divisions.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </label>
+          ) : <p className="text-sm text-slate-500">Aún no hay equipos; se muestra una tabla de ejemplo.</p>)}
+          {(has("resultsPick") || has("standingsPick")) && (
+            <p className="text-xs text-slate-500">Caben hasta 20 renglones; con muchos, el texto se hace más pequeño.</p>
+          )}
+          {has("tableTitle") && <label className={label}>Título<input className={`${inputCls} mt-1`} value={data.tableTitle} maxLength={50} onChange={(e) => set("tableTitle", e.target.value)} /></label>}
+          {has("background") && (
+            <div className="space-y-1">
+              <div className="flex flex-wrap gap-2">{imgBtn("background", "Foto de fondo")}</div>
+              <p className="text-xs text-slate-500">Se ve en la franja lateral y al final, cuando sale el color. Sin foto, termina con tu logo.</p>
+            </div>
           )}
           {tpl.fields.length === 0 && <p className="text-sm text-slate-500">Esta animación no necesita datos: usa tu logo y los colores de la marca.</p>}
         </div>

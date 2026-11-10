@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_BRANDS, MAX_PALETTE, ROLES, brandToCssVars, sanitizeBrand, type BrandKind, type BrandSettings } from "@/lib/brand";
 import { createClient } from "@/lib/supabase/client";
-import type { Player, Team } from "@/lib/types";
+import type { Division, Fixture, Player, Team } from "@/lib/types";
 import { btnDanger, btnGhost, btnPrimary, Card, ErrorMsg } from "@/components/ui";
 import ColorField from "@/components/ColorField";
 import BrandPreview from "./BrandPreview";
@@ -26,9 +26,11 @@ type Props = {
   matches: MatchOption[];
   teams?: Team[];
   players?: Player[];
+  fixtures?: Fixture[];
+  divisions?: Division[];
 };
 
-export default function BrandEditor({ tournamentId, tournamentName, kind, initial, initialLogoPath, teamNames, matches, teams = [], players = [] }: Props) {
+export default function BrandEditor({ tournamentId, tournamentName, kind, initial, initialLogoPath, teamNames, matches, teams = [], players = [], fixtures = [], divisions = [] }: Props) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
@@ -219,7 +221,7 @@ export default function BrandEditor({ tournamentId, tournamentName, kind, initia
         </div>
       </div>
     </div>
-    <MotionStudio kind={kind} settings={settings} logoUrl={logoUrl} tournamentName={tournamentName} matches={matches} teams={teams} players={players} />
+    <MotionStudio kind={kind} settings={settings} logoUrl={logoUrl} tournamentName={tournamentName} matches={matches} teams={teams} players={players} fixtures={fixtures} divisions={divisions} />
     </div>
   );
 }

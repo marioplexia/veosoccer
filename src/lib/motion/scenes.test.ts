@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRANDS } from "@/lib/brand";
-import { DEFAULT_MATCH, FORMATS, TEMPLATES, drawScene, parseFormation, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
+import { DEFAULT_MATCH, FORMATS, TEMPLATES, drawScene, initials, parseFormation, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
 
 /** Contexto 2D falso: registra las llamadas de texto y acepta cualquier otra operación. */
 function fakeCtx() {
@@ -33,7 +33,7 @@ describe("plantillas", () => {
     expect(new Set(TEMPLATES.map((t) => t.id)).size).toBe(TEMPLATES.length);
     expect(TEMPLATES.some((t) => t.kind === "tournament")).toBe(true);
     for (const id of ["goal", "halftime", "fulltime", "kickoff", "yellow", "red", "substitution"]) expect(templateById(id as never).kind).toBe("broadcast");
-    expect(TEMPLATES.every((t) => t.duration > 2 && t.duration < 8)).toBe(true);
+    expect(TEMPLATES.every((t) => t.duration > 2 && t.duration <= 10)).toBe(true);
   });
 });
 
@@ -178,5 +178,53 @@ describe("vividMix", () => {
     const mid = vividMix("#EBFF00", "#963CFF", 0.5);
     const [r, g, b] = [1, 3, 5].map((k) => parseInt(mid.slice(k, k + 2), 16));
     expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeGreaterThan(150);
+  });
+});
+
+describe("tablas animadas", () => {
+  it("duran 10 segundos", () => {
+    expect(templateById("results").duration).toBe(10);
+    expect(templateById("standings").duration).toBe(10);
+  });
+  it("los resultados muestran cada partido y su marcador mientras se mantienen", () => {
+    const f = fakeCtx();
+    drawScene(f.ctx, "results", input("tournament", "horizontal", 5));
+    expect(f.texts).toContain("Leones");
+    expect(f.texts).toContain("5-0");
+    expect(f.texts).toContain("Rayos");
+    expect(f.texts).toContain("Jornada 6");
+  });
+  it("un partido sin marcador se muestra como vs", () => {
+    const f = fakeCtx();
+    drawScene(f.ctx, "results", input("tournament", "horizontal", 5, { data: { ...DEFAULT_MATCH, results: [{ home: "A", away: "B", homeScore: null, awayScore: null }] } }));
+    expect(f.texts).toContain("vs");
+  });
+  it("al final ya no se ven los renglones", () => {
+    const f = fakeCtx();
+    drawScene(f.ctx, "results", input("tournament", "horizontal", 9.8));
+    expect(f.texts).not.toContain("Leones");
+  });
+  it("la tabla muestra posiciones, columnas y puntos", () => {
+    const f = fakeCtx();
+    drawScene(f.ctx, "standings", input("tournament", "vertical", 5));
+    expect(f.texts).toEqual(expect.arrayContaining(["PJ", "DG", "PTS", "Leones", "16", "+12"]));
+  });
+  it("tolera listas vacías y demasiado largas", () => {
+    const empty = fakeCtx();
+    expect(() => drawScene(empty.ctx, "results", input("tournament", "square", 5, { data: { ...DEFAULT_MATCH, results: [] } }))).not.toThrow();
+    const many = Array.from({ length: 40 }, (_, k) => ({ pos: k + 1, team: `E${k}`, played: 1, gd: 0, points: 0 }));
+    const f = fakeCtx();
+    drawScene(f.ctx, "standings", input("tournament", "horizontal", 5, { data: { ...DEFAULT_MATCH, standings: many } }));
+    expect(f.texts).toContain("E19");
+    expect(f.texts).not.toContain("E20");
+  });
+});
+
+describe("initials", () => {
+  it("toma las iniciales de las palabras importantes", () => {
+    expect(initials("Liga Municipal")).toBe("LM");
+    expect(initials("Liga Municipal de Fútbol")).toBe("LMF");
+    expect(initials("Águilas")).toBe("A");
+    expect(initials("  ")).toBe("•");
   });
 });
