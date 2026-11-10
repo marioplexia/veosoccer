@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRANDS } from "@/lib/brand";
-import { DEFAULT_MATCH, FORMATS, TEMPLATES, drawScene, templateById, washPalette, type FormatId, type SceneInput } from "./scenes";
+import { DEFAULT_MATCH, FORMATS, TEMPLATES, drawScene, stageState, templateById, vividMid, washPalette, type FormatId, type SceneInput } from "./scenes";
 
 /** Contexto 2D falso: registra las llamadas de texto y acepta cualquier otra operación. */
 function fakeCtx() {
@@ -98,6 +98,43 @@ describe("drawScene", () => {
 describe("washPalette", () => {
   it("usa los colores propios de cada marca", () => {
     expect(washPalette("tournament", { primary: "#1", secondary: "#2", accent: "#3", highlight: "#4", extra: "#5" })).toEqual(["#1", "#2", "#3", "#4", "#5"]);
-    expect(washPalette("broadcast", { homeStripe: "#a", awayStripe: "#b", clockBg: "#c", lowerAccent: "#d", scoreBg: "#e" })).toEqual(["#a", "#b", "#c", "#d", "#e"]);
+    expect(washPalette("broadcast", { homeStripe: "#a", awayStripe: "#b", clockBg: "#c", lowerAccent: "#d", scoreBg: "#e" })).toEqual(["#a", "#b", "#c", "#d"]);
+  });
+});
+
+describe("stageState (color → barrido → blanco con giro → siguiente color)", () => {
+  const cfg = { D: 5.8, lead: 0, blocks: 2, white: 0.7 };
+  it("mantiene un par de colores, barre al siguiente y lo mantiene", () => {
+    const early = stageState(0.6, cfg), late = stageState(1.9, cfg);
+    expect(early.reveal).toBe(1);
+    expect(early.phase).toBeLessThan(0.2);
+    expect(late.phase).toBeGreaterThan(1);
+    expect(early.spin).toBe(-1);
+  });
+  it("pasa a blanco con el logo girando entre bloques y al final", () => {
+    const mid = stageState(2.2 + 0.35, cfg);
+    expect(mid.reveal).toBe(0);
+    expect(mid.spin).toBeCloseTo(0.5, 1);
+    expect(stageState(5.5, cfg).reveal).toBe(0);
+    expect(stageState(5.5, cfg).spin).toBeGreaterThan(0);
+  });
+  it("el segundo bloque usa los colores siguientes de la paleta", () => {
+    expect(stageState(3.3, cfg).phase).toBeGreaterThanOrEqual(2);
+    expect(stageState(3.3, cfg).reveal).toBe(1);
+  });
+  it("fuera del video no muestra nada", () => {
+    expect(stageState(-1, cfg)).toMatchObject({ reveal: 0, spin: -1 });
+    expect(stageState(99, cfg)).toMatchObject({ reveal: 0, spin: -1 });
+  });
+});
+
+describe("vividMid", () => {
+  it("el punto medio entre colores opuestos conserva la saturación en vez de volverse gris", () => {
+    const mid = vividMid("#FF2882", "#00FF87"); // rosa y verde
+    const [r, g, b] = [1, 3, 5].map((k) => parseInt(mid.slice(k, k + 2), 16));
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeGreaterThan(150);
+  });
+  it("con grises usa la mezcla simple", () => {
+    expect(vividMid("#000000", "#FFFFFF")).toBe("#808080");
   });
 });
