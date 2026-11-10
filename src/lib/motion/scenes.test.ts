@@ -182,13 +182,17 @@ describe("vividMix", () => {
 });
 
 describe("tablas animadas", () => {
+  it("están en la Marca de Transmisión", () => {
+    expect(templateById("results").kind).toBe("broadcast");
+    expect(templateById("standings").kind).toBe("broadcast");
+  });
   it("duran 10 segundos", () => {
     expect(templateById("results").duration).toBe(10);
     expect(templateById("standings").duration).toBe(10);
   });
   it("los resultados muestran cada partido y su marcador mientras se mantienen", () => {
     const f = fakeCtx();
-    drawScene(f.ctx, "results", input("tournament", "horizontal", 5));
+    drawScene(f.ctx, "results", input("broadcast", "horizontal", 5));
     expect(f.texts).toContain("Leones");
     expect(f.texts).toContain("5-0");
     expect(f.texts).toContain("Rayos");
@@ -196,25 +200,25 @@ describe("tablas animadas", () => {
   });
   it("un partido sin marcador se muestra como vs", () => {
     const f = fakeCtx();
-    drawScene(f.ctx, "results", input("tournament", "horizontal", 5, { data: { ...DEFAULT_MATCH, results: [{ home: "A", away: "B", homeScore: null, awayScore: null }] } }));
+    drawScene(f.ctx, "results", input("broadcast", "horizontal", 5, { data: { ...DEFAULT_MATCH, results: [{ home: "A", away: "B", homeScore: null, awayScore: null }] } }));
     expect(f.texts).toContain("vs");
   });
   it("al final ya no se ven los renglones", () => {
     const f = fakeCtx();
-    drawScene(f.ctx, "results", input("tournament", "horizontal", 9.8));
+    drawScene(f.ctx, "results", input("broadcast", "horizontal", 9.8));
     expect(f.texts).not.toContain("Leones");
   });
   it("la tabla muestra posiciones, columnas y puntos", () => {
     const f = fakeCtx();
-    drawScene(f.ctx, "standings", input("tournament", "vertical", 5));
+    drawScene(f.ctx, "standings", input("broadcast", "vertical", 5));
     expect(f.texts).toEqual(expect.arrayContaining(["PJ", "DG", "PTS", "Leones", "16", "+12"]));
   });
   it("tolera listas vacías y demasiado largas", () => {
     const empty = fakeCtx();
-    expect(() => drawScene(empty.ctx, "results", input("tournament", "square", 5, { data: { ...DEFAULT_MATCH, results: [] } }))).not.toThrow();
+    expect(() => drawScene(empty.ctx, "results", input("broadcast", "square", 5, { data: { ...DEFAULT_MATCH, results: [] } }))).not.toThrow();
     const many = Array.from({ length: 40 }, (_, k) => ({ pos: k + 1, team: `E${k}`, played: 1, gd: 0, points: 0 }));
     const f = fakeCtx();
-    drawScene(f.ctx, "standings", input("tournament", "horizontal", 5, { data: { ...DEFAULT_MATCH, standings: many } }));
+    drawScene(f.ctx, "standings", input("broadcast", "horizontal", 5, { data: { ...DEFAULT_MATCH, standings: many } }));
     expect(f.texts).toContain("E19");
     expect(f.texts).not.toContain("E20");
   });
