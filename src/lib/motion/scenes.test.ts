@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRANDS } from "@/lib/brand";
-import { DEFAULT_MATCH, FORMATS, TEMPLATES, drawScene, initials, parseFormation, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
+import { DEFAULT_MATCH, FORMATS, TEMPLATES, autoTeamColors, drawScene, initials, parseFormation, resolveTeamColors, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
 
 /** Contexto 2D falso: registra las llamadas de texto y acepta cualquier otra operación. */
 function fakeCtx() {
@@ -230,5 +230,39 @@ describe("initials", () => {
     expect(initials("Liga Municipal de Fútbol")).toBe("LMF");
     expect(initials("Águilas")).toBe("A");
     expect(initials("  ")).toBe("•");
+  });
+});
+
+describe("marcadores de equipo", () => {
+  it("el gol del equipo muestra siglas, el reloj corriendo y luego el resultado", () => {
+    const f = fakeCtx();
+    drawScene(f.ctx, "teamGoal", input("broadcast", "horizontal", 2, { data: { ...DEFAULT_MATCH, minute: 34 } }));
+    expect(f.texts).toContain("LEO");
+    expect(f.texts).toContain("G");
+    expect(f.texts).toContain("L");
+    expect(f.texts).toContain("34:02");
+    const later = fakeCtx();
+    drawScene(later.ctx, "teamGoal", input("broadcast", "horizontal", 4.8));
+    expect(later.texts).toContain("2-1");
+    expect(later.texts).not.toContain("G");
+  });
+  it("si anota el visitante usa sus siglas", () => {
+    const f = fakeCtx();
+    drawScene(f.ctx, "teamGoal", input("broadcast", "horizontal", 2, { data: { ...DEFAULT_MATCH, side: "away" } }));
+    expect(f.texts).toContain("TIG");
+  });
+  it("la columna dibuja un marcador por equipo (máx. 12)", () => {
+    const f = fakeCtx();
+    drawScene(f.ctx, "teamBugs", input("broadcast", "vertical", 6));
+    for (const ab of ["LEO", "TIG", "AGU", "LOB", "BUH", "HAL"]) expect(f.texts).toContain(ab);
+    const many = Array.from({ length: 30 }, (_, k) => ({ name: `Equipo${String(k).padStart(2, "0")}`, color: "#112233", color2: "#FFFFFF" }));
+    const g = fakeCtx();
+    expect(() => drawScene(g.ctx, "teamBugs", input("broadcast", "vertical", 7, { data: { ...DEFAULT_MATCH, bugTeams: many } }))).not.toThrow();
+  });
+  it("los colores automáticos son estables y válidos; los inválidos se ignoran", () => {
+    expect(autoTeamColors("Leones")).toEqual(autoTeamColors("Leones"));
+    expect(autoTeamColors("Leones").color).toMatch(/^#[0-9A-F]{6}$/);
+    expect(resolveTeamColors("Leones", "#c8102e", "")).toEqual({ color: "#C8102E", color2: autoTeamColors("Leones").color2 });
+    expect(resolveTeamColors("Leones", "rojo", "#12")).toEqual(autoTeamColors("Leones"));
   });
 });

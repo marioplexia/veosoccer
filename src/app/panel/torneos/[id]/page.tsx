@@ -21,7 +21,7 @@ export default async function TournamentPage({ params }: { params: Promise<{ id:
 
   const [divisions, teams, venues, fixtures, brands, players] = await Promise.all([
     supabase.from("divisions").select("id, name, position").eq("tournament_id", id).order("position").order("created_at"),
-    supabase.from("tournament_teams").select("id, name, division_id, logo_path").eq("tournament_id", id).order("name"),
+    supabase.from("tournament_teams").select("id, name, division_id, logo_path, color, color2").eq("tournament_id", id).order("name"),
     supabase.from("venues").select("id, name").eq("tournament_id", id).order("name"),
     supabase.from("fixtures").select("id, division_id, round, home_team_id, away_team_id, venue_id, kickoff, home_score, away_score, note").eq("tournament_id", id).order("round").order("kickoff", { nullsFirst: false }),
     supabase.from("brands").select("kind, settings, logo_path").eq("tournament_id", id),

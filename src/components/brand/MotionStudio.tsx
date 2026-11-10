@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BrandKind, BrandSettings } from "@/lib/brand";
-import { DEFAULT_MATCH, FORMATIONS, FORMATS, TEMPLATES, drawScene, parseFormation, templateById, type FieldKey, type FormatId, type MatchData, type SceneId, type SceneImage } from "@/lib/motion/scenes";
+import { DEFAULT_MATCH, FORMATIONS, FORMATS, TEMPLATES, drawScene, parseFormation, resolveTeamColors, templateById, type FieldKey, type FormatId, type MatchData, type SceneId, type SceneImage } from "@/lib/motion/scenes";
 import { btnGhost, btnPrimary, Card, ErrorMsg, inputCls } from "@/components/ui";
 import { useGoogleFonts } from "./useGoogleFonts";
 import { mediaUrl } from "@/lib/media";
@@ -118,6 +118,11 @@ export default function MotionStudio({
   function loadCrests(ids: string[]) {
     for (const tid of new Set(ids)) { const tm = teamById(tid); if (tm?.logo_path) loadRemote(crestKey(tid), tm.logo_path); }
   }
+  function applyBugTeams(div: string) {
+    const tms = teams.filter((x) => div === "all" || x.division_id === div).slice(0, 12);
+    setData((d) => ({ ...d, bugTeams: tms.map((tm) => ({ name: tm.name, ...resolveTeamColors(tm.name, tm.color ?? "", tm.color2 ?? ""), crest: crestKey(tm.id) })) }));
+    loadCrests(tms.map((tm) => tm.id));
+  }
   function applyRound(key: string) {
     const [div, round] = key.split("|");
     const fx = fixtures.filter((f) => f.division_id === div && f.round === Number(round))
@@ -227,7 +232,11 @@ export default function MotionStudio({
   function pickMatch(mid: string) {
     const m = matches.find((x) => x.id === mid);
     if (!m) return;
-    setData((d) => ({ ...d, home: m.home, away: m.away, homeScore: m.homeScore, awayScore: m.awayScore }));
+    const th = teamById(m.homeTeamId), ta = teamById(m.awayTeamId);
+    setData((d) => ({
+      ...d, home: m.home, away: m.away, homeScore: m.homeScore, awayScore: m.awayScore,
+      homeColor: th?.color ?? "", homeColor2: th?.color2 ?? "", awayColor: ta?.color ?? "", awayColor2: ta?.color2 ?? "",
+    }));
     loadRemote("homeLogo", teamById(m.homeTeamId)?.logo_path);
     loadRemote("awayLogo", teamById(m.awayTeamId)?.logo_path);
   }
@@ -412,6 +421,35 @@ export default function MotionStudio({
                 : "Consejo: sube escudos y plantillas en la pestaña Equipos y aquí se cargarán solos."}
             </p>
           )}
+          {has("teamColors") && (
+            <div className="grid grid-cols-2 gap-3">
+              {(["home", "away"] as const).map((side) => {
+                const nm = side === "home" ? data.home : data.away;
+                const c = resolveTeamColors(nm, side === "home" ? data.homeColor : data.awayColor, side === "home" ? data.homeColor2 : data.awayColor2);
+                return (
+                  <div key={side} className="text-sm font-medium text-slate-700">
+                    Colores {side === "home" ? "local" : "visitante"}
+                    <div className="mt-1 flex gap-2">
+                      <input type="color" value={c.color} aria-label={`Color principal ${side === "home" ? "local" : "visitante"}`} className="h-9 w-12 cursor-pointer rounded border border-slate-300 p-0.5"
+                        onChange={(e) => set(side === "home" ? "homeColor" : "awayColor", e.target.value.toUpperCase())} />
+                      <input type="color" value={c.color2} aria-label={`Color secundario ${side === "home" ? "local" : "visitante"}`} className="h-9 w-12 cursor-pointer rounded border border-slate-300 p-0.5"
+                        onChange={(e) => set(side === "home" ? "homeColor2" : "awayColor2", e.target.value.toUpperCase())} />
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="col-span-2 text-xs text-slate-500">Al elegir un partido se usan los colores y escudos guardados en Equipos.</p>
+            </div>
+          )}
+          {has("bugTeamsPick") && (teams.length > 0 ? (
+            <label className={label}>Equipos
+              <select className={`${inputCls} mt-1`} defaultValue="" onChange={(e) => e.target.value && applyBugTeams(e.target.value)}>
+                <option value="">Elegir…</option>
+                {divisions.length > 1 && <option value="all">Todas las divisiones (máx. 12)</option>}
+                {divisions.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </label>
+          ) : <p className="text-sm text-slate-500">Aún no hay equipos; se muestran marcadores de ejemplo.</p>)}
           {has("resultsPick") && (roundOptions.length > 0 ? (
             <label className={label}>Jornada del calendario
               <select className={`${inputCls} mt-1`} defaultValue="" onChange={(e) => e.target.value && applyRound(e.target.value)}>

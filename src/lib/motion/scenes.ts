@@ -18,7 +18,20 @@ export type MatchData = {
   tableTitle: string;
   results: ResultRow[];
   standings: StandRow[];
+  /** Colores de los equipos ("" = automático según el nombre). */
+  homeColor: string; homeColor2: string; awayColor: string; awayColor2: string;
+  bugTeams: BugTeam[];
 };
+
+export type BugTeam = { name: string; color: string; color2: string; crest?: string };
+
+/** Colores automáticos y estables para un equipo sin colores definidos. */
+export function autoTeamColors(name: string): { color: string; color2: string } {
+  let hsh = 0;
+  for (const ch of name) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
+  const hue = hsh % 360;
+  return { color: hsvToHex({ h: hue, s: 0.78, v: 0.72 }), color2: hsvToHex({ h: (hue + 160) % 360, s: 0.65, v: 0.95 }) };
+}
 
 /** Renglón de resultados. homeCrest/awayCrest son claves de `images` (escudos). */
 export type ResultRow = { home: string; away: string; homeScore: number | null; awayScore: number | null; homeCrest?: string; awayCrest?: string };
@@ -51,10 +64,13 @@ export const DEFAULT_MATCH: MatchData = {
   standings: ["Leones", "Águilas", "Lobos", "Búhos", "Cóndores", "Delfines", "Zorros", "Coyotes", "Venados", "Potros"].map((team, k) => ({
     pos: k + 1, team, played: 6, gd: 12 - k * 3, points: 16 - k * 1 - (k > 4 ? 2 : 0),
   })),
+  homeColor: "", homeColor2: "", awayColor: "", awayColor2: "",
+  bugTeams: [["Leones", "#C8102E", "#1D4ED8"], ["Tigres", "#F59E0B", "#111827"], ["Águilas", "#1D4ED8", "#FFFFFF"], ["Lobos", "#4B5563", "#F43F5E"], ["Búhos", "#7C2D12", "#FACC15"], ["Halcones", "#0F766E", "#A7F3D0"]]
+    .map(([name, color, color2]) => ({ name, color, color2 })),
 };
 
-export type SceneId = "ident" | "matchday" | "matchup" | "totw" | "potw" | "results" | "standings" | "goal" | "halftime" | "fulltime" | "kickoff" | "yellow" | "red" | "substitution";
-export type FieldKey = "match" | "home" | "away" | "homeScore" | "awayScore" | "side" | "player" | "minute" | "playerOut" | "playerIn" | "round" | "subtitle" | "homeLogo" | "awayLogo" | "teamLogo" | "photo" | "teamTitle" | "awardTitle" | "label" | "formation" | "players" | "resultsPick" | "standingsPick" | "tableTitle" | "background";
+export type SceneId = "teamGoal" | "teamBugs" | "ident" | "matchday" | "matchup" | "totw" | "potw" | "results" | "standings" | "goal" | "halftime" | "fulltime" | "kickoff" | "yellow" | "red" | "substitution";
+export type FieldKey = "match" | "home" | "away" | "homeScore" | "awayScore" | "side" | "player" | "minute" | "playerOut" | "playerIn" | "round" | "subtitle" | "homeLogo" | "awayLogo" | "teamLogo" | "photo" | "teamTitle" | "awardTitle" | "label" | "formation" | "players" | "resultsPick" | "standingsPick" | "tableTitle" | "background" | "teamColors" | "bugTeamsPick";
 
 export type TemplateDef = { id: SceneId; kind: BrandKind; label: string; description: string; duration: number; fields: FieldKey[]; format?: FormatId; poster?: number };
 
@@ -64,6 +80,8 @@ export const TEMPLATES: TemplateDef[] = [
   { id: "matchup", kind: "tournament", label: "Presentación de partido", description: "Los dos escudos con tu logo al centro, el partido y la fecha.", duration: 5, fields: ["match", "home", "away", "homeLogo", "awayLogo", "subtitle"], poster: 3.5 },
   { id: "totw", kind: "tournament", label: "Equipo ideal", description: "Cancha con las tarjetas de los jugadores en su formación.", duration: 5, fields: ["teamTitle", "round", "formation", "players"], format: "portrait", poster: 4 },
   { id: "potw", kind: "tournament", label: "Jugador de la jornada", description: "Foto y nombre del jugador destacado.", duration: 5, fields: ["awardTitle", "label", "round", "player", "photo", "teamLogo"], format: "portrait", poster: 4 },
+  { id: "teamGoal", kind: "broadcast", label: "Gol del equipo", description: "Marcador del equipo con sus colores y escudo: cae “GOL” letra por letra, corre el reloj y aparece el resultado.", duration: 6, fields: ["match", "home", "away", "homeScore", "awayScore", "side", "minute", "teamColors"], poster: 3 },
+  { id: "teamBugs", kind: "broadcast", label: "Marcadores de equipos", description: "Columna con el marcador de cada equipo, animándose uno tras otro.", duration: 8, fields: ["bugTeamsPick", "minute"], format: "vertical", poster: 5 },
   { id: "results", kind: "broadcast", label: "Resultados de la jornada", description: "Lista de resultados con escudos; sale con barrido de color y deja ver tu foto de fondo.", duration: 10, fields: ["resultsPick", "tableTitle", "background"], poster: 5 },
   { id: "standings", kind: "broadcast", label: "Tabla de posiciones", description: "Tabla con escudos y puntos, con el mismo movimiento que los resultados.", duration: 10, fields: ["standingsPick", "tableTitle", "background"], poster: 5 },
   { id: "goal", kind: "broadcast", label: "Gol", description: "¡GOL! con el goleador, el minuto y el marcador actualizado.", duration: 5.2, fields: ["match", "home", "away", "homeScore", "awayScore", "side", "player", "minute"] },
@@ -1136,6 +1154,221 @@ function sceneStandings(ctx: Ctx, i: SceneInput) {
     });
 }
 
+/* ───────────── marcador de equipo con animación de gol ───────────── */
+
+export function resolveTeamColors(name: string, color: string, color2: string) {
+  const auto = autoTeamColors(name);
+  return { color: normalizeTeamHex(color) ?? auto.color, color2: normalizeTeamHex(color2) ?? auto.color2 };
+}
+function normalizeTeamHex(s: string): string | null {
+  return /^#[0-9A-Fa-f]{6}$/.test(s) ? s.toUpperCase() : null;
+}
+
+/** Balón simple (círculo blanco con parches), girando. */
+function ball(ctx: Ctx, cx: number, cy: number, r: number, rot: number, line: string) {
+  ctx.save();
+  ctx.translate(cx, cy); ctx.rotate(rot);
+  ctx.fillStyle = "#FFFFFF";
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  ctx.lineWidth = Math.max(1.5, r * 0.09); ctx.strokeStyle = line; ctx.stroke();
+  ctx.fillStyle = line;
+  const pent = (x: number, y: number, rr2: number) => {
+    ctx.beginPath();
+    for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + (k * 2 * Math.PI) / 5; ctx.lineTo(x + rr2 * Math.cos(a), y + rr2 * Math.sin(a)); }
+    ctx.closePath(); ctx.fill();
+  };
+  pent(0, 0, r * 0.32);
+  for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + (k * 2 * Math.PI) / 5; pent(Math.cos(a) * r * 0.86, Math.sin(a) * r * 0.86, r * 0.2); }
+  ctx.restore();
+}
+
+/**
+ * Marcador de un equipo: siglas | franja en zigzag | escudo | GOL, con el reloj debajo.
+ * `tl` es el tiempo local desde que entra la barra. `after` (0-1) cambia GOL por el resultado.
+ */
+export function teamBug(ctx: Ctx, i: SceneInput, cx: number, top: number, W: number, team: BugTeam, tl: number, o: { clock: string; score?: string; after?: number }) {
+  const H = W * 0.105;
+  const x0 = cx - W / 2;
+  const c = i.colors;
+  const txt = readableOn(team.color);
+  const inP = easeOutCubic(progress(tl, 0, 0.35));
+  if (inP <= 0) return;
+
+  // reloj (sale de detrás de la barra)
+  const tabW = W * 0.27, tabH = H * 0.82;
+  const tabCx = x0 + W * 0.43;
+  const tabP = easeOutCubic(progress(tl, 0.25, 0.6));
+  ctx.save();
+  ctx.translate(0, (tabP - 1) * tabH);
+  ctx.fillStyle = c.scoreBg;
+  ctx.beginPath();
+  const r = tabH * 0.22;
+  ctx.moveTo(tabCx - tabW / 2, top + H - 2);
+  ctx.lineTo(tabCx + tabW / 2, top + H - 2);
+  ctx.lineTo(tabCx + tabW / 2, top + H + tabH - r);
+  ctx.arcTo(tabCx + tabW / 2, top + H + tabH, tabCx + tabW / 2 - r, top + H + tabH, r);
+  ctx.lineTo(tabCx - tabW / 2 + r, top + H + tabH);
+  ctx.arcTo(tabCx - tabW / 2, top + H + tabH, tabCx - tabW / 2, top + H + tabH - r, r);
+  ctx.closePath(); ctx.fill();
+  text(ctx, o.clock, tabCx, top + H + tabH * 0.55, i.fonts.numbers, tabH * 0.68, c.clockText, { maxW: tabW * 0.9 });
+  ctx.restore();
+
+  // barra (se abre desde el centro)
+  ctx.save();
+  ctx.translate(cx, 0); ctx.scale(inP, 1); ctx.translate(-cx, 0);
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.22)"; ctx.shadowBlur = H * 0.35; ctx.shadowOffsetY = H * 0.08;
+  ctx.fillStyle = team.color;
+  rr(ctx, x0, top, W, H, H * 0.08); ctx.fill();
+  ctx.restore();
+  ctx.save();
+  rr(ctx, x0, top, W, H, H * 0.08); ctx.clip();
+  // lado de GOL un poco más claro para separar
+  const g = ctx.createLinearGradient(x0 + W * 0.45, 0, x0 + W, 0);
+  g.addColorStop(0, "rgba(255,255,255,.0)"); g.addColorStop(1, "rgba(255,255,255,.12)");
+  ctx.fillStyle = g; ctx.fillRect(x0 + W * 0.45, top, W * 0.55, H);
+  // franja en zigzag (rayo) con el segundo color
+  const b = x0 + W * 0.3, bw = W * 0.13;
+  const bolt = (dx: number, col: string) => {
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(b + dx, top); ctx.lineTo(b + dx + bw * 0.62, top);
+    ctx.lineTo(b + dx + bw * 0.42, top + H * 0.46); ctx.lineTo(b + dx + bw, top + H * 0.46);
+    ctx.lineTo(b + dx + bw * 0.78, top + H); ctx.lineTo(b + dx + bw * 0.16, top + H);
+    ctx.lineTo(b + dx + bw * 0.36, top + H * 0.56); ctx.lineTo(b + dx - bw * 0.1, top + H * 0.56);
+    ctx.closePath(); ctx.fill();
+  };
+  bolt(bw * 0.18, mix(team.color2, "#000000", 0.25));
+  bolt(0, team.color2);
+  // brillo que cruza la barra de vez en cuando
+  for (const at of [1.25, 2.7, 4.2]) {
+    const sp = progress(tl, at, at + 0.55);
+    if (sp <= 0 || sp >= 1) continue;
+    const sx = x0 - W * 0.2 + sp * W * 1.4;
+    const sg = ctx.createLinearGradient(sx - W * 0.08, 0, sx + W * 0.08, 0);
+    sg.addColorStop(0, "rgba(255,255,255,0)"); sg.addColorStop(0.5, "rgba(255,255,255,.4)"); sg.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = sg;
+    ctx.beginPath(); ctx.moveTo(sx - W * 0.06, top + H); ctx.lineTo(sx, top); ctx.lineTo(sx + W * 0.06, top); ctx.lineTo(sx, top + H); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+
+  // siglas
+  text(ctx, abbreviation(team.name, "EQU"), x0 + W * 0.155, top + H / 2, i.fonts.heading, H * 0.66, txt, { maxW: W * 0.26 });
+
+  // GOL letra por letra (la O es un balón), luego el resultado
+  const after = clamp01(o.after ?? 0);
+  const gx = x0 + W * 0.74;
+  const lp = H * 0.74;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0 + W * 0.45, top, W * 0.55, H); ctx.clip();
+  if (after < 1) {
+    ctx.font = fontStr(i.fonts.heading, lp);
+    const wG = ctx.measureText("G").width, wL = ctx.measureText("L").width;
+    const wO = lp * 0.78;
+    const gap = lp * 0.06;
+    const total = wG + wO + wL + gap * 2;
+    const xs = [gx - total / 2 + wG / 2, gx - total / 2 + wG + gap + wO / 2, gx + total / 2 - wL / 2];
+    ["G", "O", "L"].forEach((ch, k) => {
+      const p = progress(tl, 0.55 + k * 0.13, 1.05 + k * 0.13);
+      if (p <= 0) return;
+      const drop = (1 - easeOutBounce(p)) * -H * 1.2;
+      const pulse = 1 + 0.06 * Math.sin(Math.max(0, tl - 1.5) * 6) * (tl > 1.5 ? 1 : 0);
+      ctx.save();
+      ctx.translate(xs[k], top + H / 2 + drop - after * H);
+      ctx.scale(pulse, pulse);
+      ctx.globalAlpha = 1 - after;
+      // En barras claras el balón usa el color del texto para no perderse sobre el fondo.
+      if (ch === "O") ball(ctx, 0, 0, wO * 0.46, tl * 5, contrastRatio(team.color, "#FFFFFF") >= 2.5 ? team.color : txt);
+      else text(ctx, ch, 0, 0, i.fonts.heading, lp, txt);
+      ctx.restore();
+    });
+  }
+  if (after > 0 && o.score) {
+    ctx.save(); ctx.translate(0, (1 - easeOutCubic(after)) * H);
+    text(ctx, o.score, gx, top + H / 2, i.fonts.numbers, H * 0.72, txt, { maxW: W * 0.4 });
+    ctx.restore();
+  }
+  ctx.restore();
+
+  // escudo al centro (rebota al anotar)
+  const bounce = 1 + 0.18 * Math.sin(Math.PI * progress(tl, 0.5, 0.9));
+  const cs = H * 1.32 * bounce;
+  const ccx = x0 + W * 0.465, ccy = top + H / 2;
+  const im = team.crest ? i.images?.[team.crest] : undefined;
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.25)"; ctx.shadowBlur = H * 0.2;
+  if (im) contain(ctx, im, ccx, ccy, cs, cs);
+  else {
+    ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(ccx, ccy, cs * 0.44, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.fillStyle = team.color; ctx.beginPath(); ctx.arc(ccx, ccy, cs * 0.36, 0, Math.PI * 2); ctx.fill();
+    text(ctx, initials(team.name), ccx, ccy, i.fonts.heading, cs * 0.28, readableOn(team.color), { maxW: cs * 0.6 });
+  }
+  ctx.restore();
+  ctx.restore();
+}
+
+function lightBackdrop(ctx: Ctx, i: SceneInput) {
+  const g = ctx.createLinearGradient(0, 0, 0, i.h);
+  g.addColorStop(0, "#F7F7F9"); g.addColorStop(1, "#E4E4EA");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, i.w, i.h);
+  shards(ctx, i.w, i.h, i.t, inkOf(i), 0.025);
+}
+
+function liveClock(minute: number, t: number) {
+  const total = Math.max(0, Math.round(minute)) * 60 + Math.floor(Math.max(0, t));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function sceneTeamGoal(ctx: Ctx, i: SceneInput) {
+  const { w, h, t, data } = i;
+  const u = Math.min(w, h) / 1080;
+  const D = 6;
+  lightBackdrop(ctx, i);
+  const home = data.side === "home";
+  const name = home ? data.home : data.away;
+  const col = resolveTeamColors(name, home ? data.homeColor : data.awayColor, home ? data.homeColor2 : data.awayColor2);
+  const team: BugTeam = { name, ...col, crest: home ? "homeLogo" : "awayLogo" };
+  const W = Math.min(w * 0.86, 1250 * u);
+  const outP = easeInCubic(progress(t, D - 0.6, D - 0.05));
+  ctx.save();
+  ctx.translate(w / 2, h * 0.45); ctx.scale(1 - outP, 1 - outP * 0.3); ctx.translate(-w / 2, -h * 0.45);
+  ctx.globalAlpha = 1 - outP;
+  teamBug(ctx, i, w / 2, h * 0.45 - W * 0.06, W, team, t - 0.1, {
+    clock: liveClock(data.minute, t),
+    score: `${data.homeScore}-${data.awayScore}`,
+    after: easeInOutCubic(progress(t, 3.7, 4.2)),
+  });
+  ctx.restore();
+}
+
+function sceneTeamBugs(ctx: Ctx, i: SceneInput) {
+  const { w, h, t, data } = i;
+  const u = Math.min(w, h) / 1080;
+  const D = 8;
+  lightBackdrop(ctx, i);
+  const teams = data.bugTeams.slice(0, 12);
+  const n = Math.max(1, teams.length);
+  const horizontal = w >= h;
+  const logoS = (horizontal ? 150 : 170) * u;
+  const topPad = h * (horizontal ? 0.06 : 0.1);
+  const avail = h - topPad - h * 0.05;
+  const rowH = avail / n;
+  const W = Math.min(w * (horizontal ? 0.5 : 0.62), (rowH / 0.2) * 1.0, 1000 * u);
+  const cx = horizontal ? w * 0.55 : w * 0.55;
+  const outP = easeInCubic(progress(t, D - 0.6, D - 0.05));
+  ctx.save(); ctx.globalAlpha = (1 - outP) * easeOutCubic(progress(t, 0, 0.5));
+  leagueLogo(ctx, i, horizontal ? w * 0.14 : w * 0.13, topPad + logoS * 0.6, logoS);
+  ctx.restore();
+  teams.forEach((tm, k) => {
+    const start = 0.2 + k * 0.28;
+    const top = topPad + k * rowH + (rowH - W * 0.105 * 1.85) / 2;
+    ctx.save(); ctx.globalAlpha = 1 - outP;
+    teamBug(ctx, i, cx, top, W, tm, t - start, { clock: liveClock(data.minute, t) });
+    ctx.restore();
+  });
+}
+
 export function drawScene(ctx: Ctx, id: SceneId, input: SceneInput) {
   ctx.save();
   ctx.clearRect(0, 0, input.w, input.h);
@@ -1145,6 +1378,8 @@ export function drawScene(ctx: Ctx, id: SceneId, input: SceneInput) {
     case "matchup": sceneMatchup(ctx, input); break;
     case "totw": sceneTotw(ctx, input); break;
     case "potw": scenePotw(ctx, input); break;
+    case "teamGoal": sceneTeamGoal(ctx, input); break;
+    case "teamBugs": sceneTeamBugs(ctx, input); break;
     case "results": sceneResults(ctx, input); break;
     case "standings": sceneStandings(ctx, input); break;
     case "goal": sceneGoal(ctx, input); break;

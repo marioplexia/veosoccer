@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { dbError } from "@/lib/format";
 import { ACCEPTED_IMAGES, mediaUrl, prepareImage, removeMedia, uploadMedia } from "@/lib/media";
+import { autoTeamColors } from "@/lib/motion/scenes";
 import { createClient } from "@/lib/supabase/client";
 import type { Division, Player, Team } from "@/lib/types";
 import { btnDanger, btnGhost, btnPrimary, Card, Empty, ErrorMsg, inputCls } from "@/components/ui";
@@ -95,6 +96,10 @@ function TeamRow({ tournamentId, divisionName, team, players }: { tournamentId: 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const auto = autoTeamColors(team.name);
+  const [c1, setC1] = useState(team.color ?? auto.color);
+  const [c2, setC2] = useState(team.color2 ?? auto.color2);
+  const colorsDirty = c1 !== (team.color ?? auto.color) || c2 !== (team.color2 ?? auto.color2);
 
   async function run(fn: () => Promise<void>) {
     setError(null);
@@ -118,6 +123,11 @@ function TeamRow({ tournamentId, divisionName, team, players }: { tournamentId: 
     await removeMedia(supabase, team.logo_path);
   });
 
+  const saveColors = () => run(async () => {
+    const { error } = await supabase.from("tournament_teams").update({ color: c1.toUpperCase(), color2: c2.toUpperCase() }).eq("id", team.id);
+    if (error) throw new Error(dbError(error));
+  });
+
   const removeTeam = () => {
     if (!window.confirm(`¿Eliminar "${team.name}" de ${divisionName}? También se borrarán sus partidos, goles y jugadores.`)) return;
     run(async () => {
@@ -132,6 +142,12 @@ function TeamRow({ tournamentId, divisionName, team, players }: { tournamentId: 
       <div className="flex flex-wrap items-center gap-3">
         <Thumb url={mediaUrl(supabase, team.logo_path)} alt={`Escudo de ${team.name}`} />
         <span className="min-w-0 flex-1 font-medium text-slate-900">{team.name}</span>
+        <span className="flex items-center gap-1" title="Colores del equipo (marcadores animados)">
+          <input type="color" value={c1} onChange={(e) => setC1(e.target.value.toUpperCase())} aria-label={`Color principal de ${team.name}`} className="h-8 w-8 cursor-pointer rounded border border-slate-300 p-0.5" />
+          <input type="color" value={c2} onChange={(e) => setC2(e.target.value.toUpperCase())} aria-label={`Color secundario de ${team.name}`} className="h-8 w-8 cursor-pointer rounded border border-slate-300 p-0.5" />
+          {colorsDirty && <button onClick={saveColors} disabled={busy} className={btnPrimary}>Guardar colores</button>}
+          {!team.color && !colorsDirty && <span className="text-xs text-slate-400">auto</span>}
+        </span>
         <FileButton text={team.logo_path ? "Cambiar escudo" : "Subir escudo"} onPick={setCrest} disabled={busy} />
         {team.logo_path && <button onClick={clearCrest} disabled={busy} className={btnDanger}>Quitar escudo</button>}
         <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className={btnGhost}>Plantilla ({players.length})</button>
