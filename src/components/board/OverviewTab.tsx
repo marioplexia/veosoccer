@@ -5,15 +5,19 @@ import { computeScorers, computeStandings } from "@/lib/standings";
 import { Card, Empty } from "@/components/ui";
 import type { BoardData } from "./Board";
 
-type Props = BoardData & { goTo: (t: "equipos" | "canchas" | "calendario" | "posiciones" | "importar") => void };
+type Props = BoardData & { goTo: (t: "divisiones" | "equipos" | "canchas" | "calendario" | "posiciones" | "importar") => void };
 
-export default function OverviewTab({ teams, venues, fixtures, goals, goTo }: Props) {
+export default function OverviewTab({ divisions, teams, venues, fixtures, goals, goTo }: Props) {
   const name = (id: string) => teams.find((t) => t.id === id)?.name ?? "?";
   const venueName = (id: string | null) => venues.find((v) => v.id === id)?.name;
   const played = fixtures.filter((f) => f.home_score != null);
   const totalGoals = played.reduce((s, f) => s + (f.home_score ?? 0) + (f.away_score ?? 0), 0);
-  const standings = computeStandings(teams, fixtures);
-  const leader = played.length > 0 ? standings[0] : null;
+  const leaders = divisions.flatMap((d) => {
+    const fx = fixtures.filter((f) => f.division_id === d.id);
+    if (!fx.some((f) => f.home_score != null)) return [];
+    const top = computeStandings(teams.filter((t) => t.division_id === d.id), fx)[0];
+    return top ? [{ division: d.name, name: top.name, points: top.points }] : [];
+  });
   const topScorer = computeScorers(goals)[0];
   const upcoming = fixtures
     .filter((f) => f.home_score == null)
@@ -21,6 +25,7 @@ export default function OverviewTab({ teams, venues, fixtures, goals, goTo }: Pr
     .slice(0, 5);
 
   const stats = [
+    ["Divisiones", divisions.length],
     ["Equipos", teams.length],
     ["Canchas", venues.length],
     ["Partidos", fixtures.length],
@@ -30,6 +35,7 @@ export default function OverviewTab({ teams, venues, fixtures, goals, goTo }: Pr
   ];
 
   const empty = teams.length === 0 && venues.length === 0;
+  const divName = (id: string) => divisions.find((d) => d.id === id)?.name;
 
   return (
     <div className="space-y-6">
@@ -44,7 +50,7 @@ export default function OverviewTab({ teams, venues, fixtures, goals, goTo }: Pr
         </Card>
       )}
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-7">
         {stats.map(([label, value]) => (
           <div key={label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <p className="text-2xl font-bold text-slate-900">{value}</p>
@@ -62,7 +68,7 @@ export default function OverviewTab({ teams, venues, fixtures, goals, goTo }: Pr
               {upcoming.map((f) => (
                 <li key={f.id} className="py-3">
                   <p className="font-medium text-slate-900">{name(f.home_team_id)} vs {name(f.away_team_id)}</p>
-                  <p className="text-sm text-slate-500">Jornada {f.round} · {formatKickoff(f.kickoff)}{venueName(f.venue_id) ? ` · ${venueName(f.venue_id)}` : ""}</p>
+                  <p className="text-sm text-slate-500">{divisions.length > 1 ? `${divName(f.division_id)} · ` : ""}Jornada {f.round} · {formatKickoff(f.kickoff)}{venueName(f.venue_id) ? ` · ${venueName(f.venue_id)}` : ""}</p>
                 </li>
               ))}
             </ul>
@@ -70,20 +76,20 @@ export default function OverviewTab({ teams, venues, fixtures, goals, goTo }: Pr
         </Card>
 
         <Card title="Destacados">
-          {!leader && !topScorer ? (
+          {leaders.length === 0 && !topScorer ? (
             <Empty>Los líderes aparecerán cuando registres resultados.</Empty>
           ) : (
             <dl className="space-y-4">
-              {leader && (
-                <div>
-                  <dt className="text-sm text-slate-500">Líder de la tabla</dt>
-                  <dd className="font-semibold text-slate-900">{leader.name} · {leader.points} pts</dd>
+              {leaders.map((l) => (
+                <div key={l.division}>
+                  <dt className="text-sm text-slate-500">Líder{divisions.length > 1 ? ` · ${l.division}` : " de la tabla"}</dt>
+                  <dd className="font-semibold text-slate-900">{l.name} · {l.points} pts</dd>
                 </div>
-              )}
+              ))}
               {topScorer && (
                 <div>
                   <dt className="text-sm text-slate-500">Máximo goleador</dt>
-                  <dd className="font-semibold text-slate-900">{topScorer.player} ({name(topScorer.teamId)}) · {topScorer.goals} {topScorer.goals === 1 ? "gol" : "goles"}</dd>
+                  <dd className="font-semibold text-slate-900">{topScorer.player} · {topScorer.goals} {topScorer.goals === 1 ? "gol" : "goles"}</dd>
                 </div>
               )}
             </dl>

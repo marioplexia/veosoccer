@@ -6,7 +6,7 @@ export function formatKickoff(k: string | null): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(k);
   if (!m) return "Sin fecha";
   const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
-  return `${fmt.format(d)} · ${m[4]}:${m[5]}`;
+  return m[4] === "00" && m[5] === "00" ? fmt.format(d) : `${fmt.format(d)} · ${m[4]}:${m[5]}`;
 }
 
 export const toInputValue = (k: string | null) => (k ? k.slice(0, 16) : "");

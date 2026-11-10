@@ -59,30 +59,51 @@ function addMinutes(time: string, minutes: number): { time: string; dayOffset: n
   return { time: `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`, dayOffset };
 }
 
+export type DivisionInput = { id: string; teamIds: string[] };
+export type MultiFixture = GeneratedFixture & { divisionId: string };
+
 /**
- * Genera el calendario completo: reparte los partidos de cada jornada entre las canchas
- * y los horarios disponibles ese día (primero llenando todas las canchas en el primer horario).
+ * Genera el calendario de varias divisiones a la vez. Las canchas se comparten: en cada jornada
+ * los partidos de todas las divisiones se reparten entre las canchas y horarios disponibles,
+ * de modo que nunca coinciden dos partidos en la misma cancha y hora.
  */
-export function generateSchedule(teamIds: string[], venueIds: string[], cfg: ScheduleConfig): GeneratedFixture[] {
-  const matches = roundRobin(teamIds, cfg.doubleRound);
-  const byRound = new Map<number, typeof matches>();
-  for (const m of matches) byRound.set(m.round, [...(byRound.get(m.round) ?? []), m]);
+export function generateMultiSchedule(divisions: DivisionInput[], venueIds: string[], cfg: ScheduleConfig): MultiFixture[] {
+  const perDivision = divisions.map((d) => {
+    const byRound = new Map<number, { round: number; homeId: string; awayId: string }[]>();
+    for (const m of roundRobin(d.teamIds, cfg.doubleRound)) byRound.set(m.round, [...(byRound.get(m.round) ?? []), m]);
+    return { id: d.id, byRound };
+  });
+  const maxRound = Math.max(0, ...perDivision.flatMap((d) => [...d.byRound.keys()]));
 
-  const out: GeneratedFixture[] = [];
-  const rounds = [...byRound.keys()].sort((a, b) => a - b);
-
-  rounds.forEach((round, idx) => {
-    const day = addDays(cfg.startDate, idx * cfg.daysBetweenRounds);
-    byRound.get(round)!.forEach((m, i) => {
+  const out: MultiFixture[] = [];
+  for (let round = 1; round <= maxRound; round++) {
+    const day = addDays(cfg.startDate, (round - 1) * cfg.daysBetweenRounds);
+    const matches = perDivision.flatMap((d) => (d.byRound.get(round) ?? []).map((m) => ({ ...m, divisionId: d.id })));
+    matches.forEach((m, i) => {
       if (venueIds.length === 0) {
         out.push({ ...m, venueId: null, kickoff: null });
         return;
       }
       const slot = Math.floor(i / venueIds.length);
-      const venueId = venueIds[i % venueIds.length];
       const { time, dayOffset } = addMinutes(cfg.firstKickoff, slot * cfg.slotMinutes);
-      out.push({ ...m, venueId, kickoff: `${addDays(day, dayOffset)}T${time}:00` });
+      out.push({ ...m, venueId: venueIds[i % venueIds.length], kickoff: `${addDays(day, dayOffset)}T${time}:00` });
     });
-  });
+  }
   return out;
+}
+
+/** Una sola división (atajo de generateMultiSchedule). */
+export function generateSchedule(teamIds: string[], venueIds: string[], cfg: ScheduleConfig): GeneratedFixture[] {
+  return generateMultiSchedule([{ id: "", teamIds }], venueIds, cfg).map(({ round, homeId, awayId, venueId, kickoff }) => ({ round, homeId, awayId, venueId, kickoff }));
+}
+
+/** Ids de partidos que comparten cancha y horario con otro (en cualquier división). */
+export function venueConflicts(fixtures: { id: string; venue_id: string | null; kickoff: string | null }[]): Set<string> {
+  const seen = new Map<string, string[]>();
+  for (const f of fixtures) {
+    if (!f.venue_id || !f.kickoff) continue;
+    const key = `${f.venue_id}|${f.kickoff.slice(0, 16)}`;
+    seen.set(key, [...(seen.get(key) ?? []), f.id]);
+  }
+  return new Set([...seen.values()].filter((ids) => ids.length > 1).flat());
 }

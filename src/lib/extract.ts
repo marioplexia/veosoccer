@@ -8,35 +8,52 @@ export type ExtractedFixture = {
   date: string | null; // YYYY-MM-DD
   time: string | null; // HH:MM
   round: number | null;
+  note: string | null; // p. ej. "Gana Tortillería El Buen Maíz"
+};
+
+export type ExtractedDivision = {
+  name: string;
+  teams: string[];
+  fixtures: ExtractedFixture[];
 };
 
 export type Extraction = {
-  teams: string[];
   venues: string[];
-  fixtures: ExtractedFixture[];
+  divisions: ExtractedDivision[];
   notes: string;
 };
+
+const FIXTURE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["home", "away", "venue", "date", "time", "round", "note"],
+  properties: {
+    home: { type: "string" },
+    away: { type: "string" },
+    venue: { type: ["string", "null"] },
+    date: { type: ["string", "null"] },
+    time: { type: ["string", "null"] },
+    round: { type: ["integer", "null"] },
+    note: { type: ["string", "null"] },
+  },
+} as const;
 
 export const EXTRACTION_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["teams", "venues", "fixtures", "notes"],
+  required: ["venues", "divisions", "notes"],
   properties: {
-    teams: { type: "array", items: { type: "string" } },
     venues: { type: "array", items: { type: "string" } },
-    fixtures: {
+    divisions: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["home", "away", "venue", "date", "time", "round"],
+        required: ["name", "teams", "fixtures"],
         properties: {
-          home: { type: "string" },
-          away: { type: "string" },
-          venue: { type: ["string", "null"] },
-          date: { type: ["string", "null"] },
-          time: { type: ["string", "null"] },
-          round: { type: ["integer", "null"] },
+          name: { type: "string" },
+          teams: { type: "array", items: { type: "string" } },
+          fixtures: { type: "array", items: FIXTURE_SCHEMA },
         },
       },
     },
@@ -44,30 +61,16 @@ export const EXTRACTION_SCHEMA = {
   },
 } as const;
 
+const MAX_DIVISIONS = 20;
 const MAX_TEAMS = 64;
-const MAX_VENUES = 20;
-const MAX_FIXTURES = 500;
+const MAX_VENUES = 40;
+const MAX_FIXTURES_PER_DIVISION = 300;
 
 const clean = (s: unknown, max = 120): string =>
   typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, max) : "";
 
 export const normName = (s: string) =>
   s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
-
-function uniqueNames(list: unknown, limit: number): string[] {
-  if (!Array.isArray(list)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const item of list) {
-    const name = clean(item);
-    const key = normName(name);
-    if (!name || seen.has(key)) continue;
-    seen.add(key);
-    out.push(name);
-    if (out.length >= limit) break;
-  }
-  return out;
-}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -83,34 +86,69 @@ function validDate(s: string): boolean {
 export function sanitizeExtraction(raw: unknown): Extraction {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
-  const teams = uniqueNames(obj.teams, MAX_TEAMS);
-  const venues = uniqueNames(obj.venues, MAX_VENUES);
+  const venues: string[] = [];
+  const venueKeys = new Set<string>();
+  const addVenue = (v: unknown) => {
+    const name = clean(v);
+    const key = normName(name);
+    if (name && !venueKeys.has(key) && venues.length < MAX_VENUES) { venues.push(name); venueKeys.add(key); }
+  };
+  if (Array.isArray(obj.venues)) obj.venues.forEach(addVenue);
 
-  const fixtures: ExtractedFixture[] = [];
-  const teamKeys = new Set(teams.map(normName));
-  const venueKeys = new Set(venues.map(normName));
+  // Las divisiones con el mismo nombre se fusionan.
+  const divisions = new Map<string, ExtractedDivision & { teamKeys: Set<string> }>();
+  const rawDivisions = Array.isArray(obj.divisions) ? obj.divisions : [];
 
-  if (Array.isArray(obj.fixtures)) {
-    for (const f of obj.fixtures.slice(0, MAX_FIXTURES)) {
-      if (!f || typeof f !== "object") continue;
-      const r = f as Record<string, unknown>;
-      const home = clean(r.home);
-      const away = clean(r.away);
-      if (!home || !away || normName(home) === normName(away)) continue;
+  for (const rd of rawDivisions) {
+    if (!rd || typeof rd !== "object") continue;
+    const d = rd as Record<string, unknown>;
+    const name = clean(d.name);
+    if (!name) continue;
+    const key = normName(name);
+    if (!divisions.has(key)) {
+      if (divisions.size >= MAX_DIVISIONS) continue;
+      divisions.set(key, { name, teams: [], fixtures: [], teamKeys: new Set() });
+    }
+    const div = divisions.get(key)!;
 
-      // Equipos/canchas que aparecen en partidos pero no en la lista: se agregan.
-      for (const t of [home, away]) {
-        if (!teamKeys.has(normName(t)) && teams.length < MAX_TEAMS) { teams.push(t); teamKeys.add(normName(t)); }
+    const addTeam = (t: unknown) => {
+      const tn = clean(t);
+      const tk = normName(tn);
+      if (tn && !div.teamKeys.has(tk) && div.teams.length < MAX_TEAMS) { div.teams.push(tn); div.teamKeys.add(tk); }
+    };
+    if (Array.isArray(d.teams)) d.teams.forEach(addTeam);
+
+    if (Array.isArray(d.fixtures)) {
+      for (const f of d.fixtures) {
+        if (div.fixtures.length >= MAX_FIXTURES_PER_DIVISION) break;
+        if (!f || typeof f !== "object") continue;
+        const r = f as Record<string, unknown>;
+        const home = clean(r.home);
+        const away = clean(r.away);
+        if (!home || !away || normName(home) === normName(away)) continue;
+
+        // Equipos y canchas que solo aparecen en partidos también se registran.
+        addTeam(home);
+        addTeam(away);
+        const venue = clean(r.venue) || null;
+        if (venue) addVenue(venue);
+
+        div.fixtures.push({
+          home,
+          away,
+          venue,
+          date: typeof r.date === "string" && validDate(r.date.trim()) ? r.date.trim() : null,
+          time: typeof r.time === "string" && TIME_RE.test(r.time.trim()) ? r.time.trim() : null,
+          round: typeof r.round === "number" && Number.isInteger(r.round) && r.round >= 1 && r.round <= 200 ? r.round : null,
+          note: clean(r.note, 200) || null,
+        });
       }
-      const venue = clean(r.venue) || null;
-      if (venue && !venueKeys.has(normName(venue)) && venues.length < MAX_VENUES) { venues.push(venue); venueKeys.add(normName(venue)); }
-
-      const date = typeof r.date === "string" && validDate(r.date.trim()) ? r.date.trim() : null;
-      const time = typeof r.time === "string" && TIME_RE.test(r.time.trim()) ? r.time.trim() : null;
-      const round = typeof r.round === "number" && Number.isInteger(r.round) && r.round >= 1 && r.round <= 200 ? r.round : null;
-      fixtures.push({ home, away, venue, date, time, round });
     }
   }
 
-  return { teams, venues, fixtures, notes: clean(obj.notes, 500) };
+  return {
+    venues,
+    divisions: [...divisions.values()].map(({ name, teams, fixtures }) => ({ name, teams, fixtures })),
+    notes: clean(obj.notes, 500),
+  };
 }

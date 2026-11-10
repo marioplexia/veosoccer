@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSchedule, roundRobin } from "./scheduler";
+import { generateMultiSchedule, generateSchedule, roundRobin, venueConflicts } from "./scheduler";
 
 const ids = (n: number) => Array.from({ length: n }, (_, i) => `t${i + 1}`);
 
@@ -64,5 +64,52 @@ describe("generateSchedule", () => {
   it("pasa al día siguiente si los horarios cruzan la medianoche", () => {
     const f = generateSchedule(ids(4), ["v1"], { ...cfg, firstKickoff: "23:00", slotMinutes: 90 }).filter((x) => x.round === 1);
     expect(f[1].kickoff).toBe("2026-12-06T00:30:00");
+  });
+});
+
+describe("generateMultiSchedule (divisiones que comparten canchas)", () => {
+  const cfg = { startDate: "2026-12-05", firstKickoff: "10:00", slotMinutes: 120, daysBetweenRounds: 7, doubleRound: false };
+  const divs = [
+    { id: "premier", teamIds: ["p1", "p2", "p3", "p4"] },
+    { id: "segundas", teamIds: ["s1", "s2", "s3", "s4", "s5", "s6"] },
+    { id: "terceras", teamIds: ["t1", "t2"] },
+  ];
+
+  it("nunca repite cancha y hora entre divisiones", () => {
+    const f = generateMultiSchedule(divs, ["cda", "taconi", "corona"], cfg);
+    const keys = f.map((x) => `${x.venueId}@${x.kickoff}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("cada division juega solo contra sus propios equipos y completa su todos contra todos", () => {
+    const f = generateMultiSchedule(divs, ["cda", "taconi"], cfg);
+    for (const d of divs) {
+      const mine = f.filter((x) => x.divisionId === d.id);
+      expect(mine).toHaveLength((d.teamIds.length * (d.teamIds.length - 1)) / 2);
+      for (const m of mine) expect(d.teamIds).toContain(m.homeId);
+    }
+  });
+
+  it("las divisiones con menos jornadas terminan antes sin dejar huecos", () => {
+    const f = generateMultiSchedule(divs, ["cda"], cfg);
+    expect(Math.max(...f.filter((x) => x.divisionId === "terceras").map((x) => x.round))).toBe(1);
+    expect(Math.max(...f.filter((x) => x.divisionId === "segundas").map((x) => x.round))).toBe(5);
+  });
+
+  it("una division sin equipos suficientes no genera partidos", () => {
+    expect(generateMultiSchedule([{ id: "x", teamIds: ["solo"] }], ["v"], cfg)).toEqual([]);
+  });
+});
+
+describe("venueConflicts", () => {
+  it("marca los partidos que comparten cancha y hora", () => {
+    const c = venueConflicts([
+      { id: "a", venue_id: "v1", kickoff: "2026-12-05T10:00:00" },
+      { id: "b", venue_id: "v1", kickoff: "2026-12-05T10:00:00" },
+      { id: "c", venue_id: "v1", kickoff: "2026-12-05T12:00:00" },
+      { id: "d", venue_id: null, kickoff: "2026-12-05T10:00:00" },
+      { id: "e", venue_id: null, kickoff: "2026-12-05T10:00:00" },
+    ]);
+    expect([...c].sort()).toEqual(["a", "b"]);
   });
 });

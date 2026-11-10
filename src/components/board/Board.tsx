@@ -1,15 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import type { Fixture, Goal, Team, Tournament, Venue } from "@/lib/types";
+import type { Division, Fixture, Goal, Team, Tournament, Venue } from "@/lib/types";
 import CalendarTab from "./CalendarTab";
 import ImportTab from "./ImportTab";
+import DivisionsTab from "./DivisionsTab";
 import ListTab from "./ListTab";
 import OverviewTab from "./OverviewTab";
 import StandingsTab from "./StandingsTab";
+import TeamsTab from "./TeamsTab";
 
 export type BoardData = {
   tournament: Tournament;
+  divisions: Division[];
   teams: Team[];
   venues: Venue[];
   fixtures: Fixture[];
@@ -18,6 +21,7 @@ export type BoardData = {
 
 const TABS = [
   { id: "resumen", label: "Resumen" },
+  { id: "divisiones", label: "Divisiones" },
   { id: "equipos", label: "Equipos" },
   { id: "canchas", label: "Canchas" },
   { id: "calendario", label: "Calendario" },
@@ -50,9 +54,8 @@ export default function Board(data: BoardData) {
 
       <div className="mt-6" role="tabpanel">
         {tab === "resumen" && <OverviewTab {...data} goTo={setTab} />}
-        {tab === "equipos" && (
-          <ListTab kind="team" table="tournament_teams" title="Equipos" tournamentId={data.tournament.id} items={data.teams} placeholder="Nombre del equipo" />
-        )}
+        {tab === "divisiones" && <DivisionsTab {...data} />}
+        {tab === "equipos" && <TeamsTab {...data} goTo={setTab} />}
         {tab === "canchas" && (
           <ListTab kind="venue" table="venues" title="Canchas" tournamentId={data.tournament.id} items={data.venues} placeholder="Nombre de la cancha" />
         )}

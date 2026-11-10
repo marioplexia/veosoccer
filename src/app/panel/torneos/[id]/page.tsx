@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import Board from "@/components/board/Board";
 import { createClient } from "@/lib/supabase/server";
-import type { Fixture, Goal, Team, Tournament, Venue } from "@/lib/types";
+import type { Division, Fixture, Goal, Team, Tournament, Venue } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -19,10 +19,11 @@ export default async function TournamentPage({ params }: { params: Promise<{ id:
   const { data: tournament } = await supabase.from("tournaments").select("id, name, description, start_date").eq("id", id).maybeSingle();
   if (!tournament) notFound();
 
-  const [teams, venues, fixtures] = await Promise.all([
-    supabase.from("tournament_teams").select("id, name").eq("tournament_id", id).order("name"),
+  const [divisions, teams, venues, fixtures] = await Promise.all([
+    supabase.from("divisions").select("id, name, position").eq("tournament_id", id).order("position").order("created_at"),
+    supabase.from("tournament_teams").select("id, name, division_id").eq("tournament_id", id).order("name"),
     supabase.from("venues").select("id, name").eq("tournament_id", id).order("name"),
-    supabase.from("fixtures").select("id, round, home_team_id, away_team_id, venue_id, kickoff, home_score, away_score").eq("tournament_id", id).order("round").order("kickoff", { nullsFirst: false }),
+    supabase.from("fixtures").select("id, division_id, round, home_team_id, away_team_id, venue_id, kickoff, home_score, away_score, note").eq("tournament_id", id).order("round").order("kickoff", { nullsFirst: false }),
   ]);
   const fixtureIds = (fixtures.data ?? []).map((f) => f.id);
   const goals = fixtureIds.length
@@ -35,6 +36,7 @@ export default async function TournamentPage({ params }: { params: Promise<{ id:
       <h1 className="mt-2 text-3xl font-bold text-slate-900">{tournament.name}</h1>
       <Board
         tournament={tournament as Tournament}
+        divisions={(divisions.data ?? []) as Division[]}
         teams={(teams.data ?? []) as Team[]}
         venues={(venues.data ?? []) as Venue[]}
         fixtures={(fixtures.data ?? []) as Fixture[]}
