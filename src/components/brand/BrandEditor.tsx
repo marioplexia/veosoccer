@@ -8,6 +8,7 @@ import { btnDanger, btnGhost, btnPrimary, Card, ErrorMsg } from "@/components/ui
 import ColorField from "@/components/ColorField";
 import BrandPreview from "./BrandPreview";
 import FontEditor from "./FontEditor";
+import MotionStudio, { type MatchOption } from "./MotionStudio";
 import { useGoogleFonts } from "./useGoogleFonts";
 
 const MAX_LOGO = 1024 * 1024;
@@ -21,9 +22,10 @@ type Props = {
   initial: BrandSettings;
   initialLogoPath: string | null;
   teamNames: string[];
+  matches: MatchOption[];
 };
 
-export default function BrandEditor({ tournamentId, tournamentName, kind, initial, initialLogoPath, teamNames }: Props) {
+export default function BrandEditor({ tournamentId, tournamentName, kind, initial, initialLogoPath, teamNames, matches }: Props) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
@@ -119,6 +121,7 @@ export default function BrandEditor({ tournamentId, tournamentName, kind, initia
     setSettings((s) => s.palette.length >= MAX_PALETTE ? s : { ...s, palette: [...s.palette, { id: `c${Date.now().toString(36)}`, name: `Color ${s.palette.length + 1}`, hex: "#6366F1" }] });
 
   return (
+    <div className="space-y-6">
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
       <div className="min-w-0 space-y-6">
         <div className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
@@ -212,6 +215,8 @@ export default function BrandEditor({ tournamentId, tournamentName, kind, initia
           </Card>
         </div>
       </div>
+    </div>
+    <MotionStudio kind={kind} settings={settings} logoUrl={logoUrl} tournamentName={tournamentName} matches={matches} />
     </div>
   );
 }

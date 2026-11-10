@@ -79,6 +79,15 @@ export default function Board(data: BoardData) {
                 initial={sanitizeBrand(kind, row?.settings)}
                 initialLogoPath={row?.logo_path ?? null}
                 teamNames={data.teams.map((t) => t.name)}
+                matches={data.fixtures.map((f) => {
+                  const nm = (id: string) => data.teams.find((t) => t.id === id)?.name ?? "?";
+                  const dv = data.divisions.find((d) => d.id === f.division_id)?.name;
+                  return {
+                    id: f.id,
+                    label: `${data.divisions.length > 1 && dv ? `${dv} · ` : ""}J${f.round} · ${nm(f.home_team_id)} vs ${nm(f.away_team_id)}`,
+                    home: nm(f.home_team_id), away: nm(f.away_team_id), homeScore: f.home_score ?? 0, awayScore: f.away_score ?? 0,
+                  };
+                })}
               />
             </div>
           );
