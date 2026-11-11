@@ -74,7 +74,7 @@ export default function BroadcastSimulator(p: {
     const input: SceneInput = {
       w: W, h: H, t: 0, kind: "broadcast", colors: p.brand.colors, fonts: p.brand.fonts,
       logo: L.logo?.img ?? null, logoSize: L.logo ? { w: L.logo.w, h: L.logo.h } : null,
-      tournamentName: p.tournamentName, data, images: L.images, palette: p.palette,
+      tournamentName: p.tournamentName, data, images: L.images, palette: p.palette, scoreStyle: p.brand.scoreboard,
     };
     renderBroadcastFrame(ctx, shot, input, L.lineups, (c) => drawStadium(c, input, time));
   };

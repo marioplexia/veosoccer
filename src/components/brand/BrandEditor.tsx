@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { DEFAULT_BRANDS, MAX_PALETTE, ROLES, brandToCssVars, sanitizeBrand, type BrandKind, type BrandSettings } from "@/lib/brand";
+import { DEFAULT_BRANDS, MAX_PALETTE, ROLES, SCOREBOARD_STYLES, brandToCssVars, sanitizeBrand, type BrandKind, type BrandSettings } from "@/lib/brand";
 import { createClient } from "@/lib/supabase/client";
 import type { Division, Fixture, Player, Team } from "@/lib/types";
 import { btnDanger, btnGhost, btnPrimary, Card, ErrorMsg } from "@/components/ui";
@@ -205,6 +205,25 @@ export default function BrandEditor({ tournamentId, tournamentName, kind, initia
             </div>
           )}
         </Card>
+
+        {kind === "broadcast" && (
+          <Card title="Diseño del marcador">
+            <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Diseño del marcador">
+              {SCOREBOARD_STYLES.map((st) => {
+                const on = (settings.scoreboard ?? "compact") === st.id;
+                return (
+                  <button key={st.id} type="button" role="radio" aria-checked={on}
+                    onClick={() => setSettings((s) => ({ ...s, scoreboard: st.id }))}
+                    className={`rounded-xl border p-3 text-left transition ${on ? "border-emerald-600 bg-emerald-50 ring-2 ring-emerald-600/30" : "border-slate-200 hover:border-slate-300"}`}>
+                    <span className="block text-sm font-semibold text-slate-900">{st.label}</span>
+                    <span className="mt-1 block text-xs text-slate-500">{st.hint}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-xs text-slate-500">Se usa en la transmisión, el simulador y los videos. Cuando hay gol, la animación ocurre dentro de este marcador.</p>
+          </Card>
+        )}
 
         <Card title="Tipografías">
           <FontEditor fonts={settings.fonts} onChange={(slot, f) => setSettings((s) => ({ ...s, fonts: { ...s.fonts, [slot]: f } }))} />

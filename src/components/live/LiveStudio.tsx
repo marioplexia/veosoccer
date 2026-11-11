@@ -137,7 +137,7 @@ export default function LiveStudio(p: Props) {
         const input: SceneInput = {
           w: W, h: H, t: 0, kind: "broadcast", colors: p.brand.colors, fonts: p.brand.fonts,
           logo: L.logo?.img ?? null, logoSize: L.logo ? { w: L.logo.w, h: L.logo.h } : null,
-          tournamentName: p.tournament.name, data: L.matchData, images: L.images, palette: p.palette,
+          tournamentName: p.tournament.name, data: L.matchData, images: L.images, palette: p.palette, scoreStyle: p.brand.scoreboard,
         };
         renderBroadcastFrame(ctx, shot, input, L.lineups, (c2) => {
           c2.fillStyle = "#0B0F19"; c2.fillRect(0, 0, W, H);

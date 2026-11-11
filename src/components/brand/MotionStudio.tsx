@@ -118,11 +118,6 @@ export default function MotionStudio({
   function loadCrests(ids: string[]) {
     for (const tid of new Set(ids)) { const tm = teamById(tid); if (tm?.logo_path) loadRemote(crestKey(tid), tm.logo_path); }
   }
-  function applyBugTeams(div: string) {
-    const tms = teams.filter((x) => div === "all" || x.division_id === div).slice(0, 12);
-    setData((d) => ({ ...d, bugTeams: tms.map((tm) => ({ name: tm.name, ...resolveTeamColors(tm.name, tm.color ?? "", tm.color2 ?? ""), crest: crestKey(tm.id) })) }));
-    loadCrests(tms.map((tm) => tm.id));
-  }
   function applyRound(key: string) {
     const [div, round] = key.split("|");
     const fx = fixtures.filter((f) => f.division_id === div && f.round === Number(round))
@@ -201,7 +196,7 @@ export default function MotionStudio({
     drawScene(ctx, L.id, {
       w: L.w, h: L.h, t: time, kind: L.kind, colors: L.settings.colors, fonts: L.settings.fonts,
       logo: L.logo?.img ?? null, logoSize: L.logo ? { w: L.logo.w, h: L.logo.h } : null,
-      tournamentName: L.tournamentName, data: L.data, images: L.images, palette: L.palette,
+      tournamentName: L.tournamentName, data: L.data, images: L.images, palette: L.palette, scoreStyle: L.settings.scoreboard,
     });
   }, []);
 
@@ -441,15 +436,6 @@ export default function MotionStudio({
               <p className="col-span-2 text-xs text-slate-500">Al elegir un partido se usan los colores y escudos guardados en Equipos.</p>
             </div>
           )}
-          {has("bugTeamsPick") && (teams.length > 0 ? (
-            <label className={label}>Equipos
-              <select className={`${inputCls} mt-1`} defaultValue="" onChange={(e) => e.target.value && applyBugTeams(e.target.value)}>
-                <option value="">Elegir…</option>
-                {divisions.length > 1 && <option value="all">Todas las divisiones (máx. 12)</option>}
-                {divisions.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-            </label>
-          ) : <p className="text-sm text-slate-500">Aún no hay equipos; se muestran marcadores de ejemplo.</p>)}
           {has("resultsPick") && (roundOptions.length > 0 ? (
             <label className={label}>Jornada del calendario
               <select className={`${inputCls} mt-1`} defaultValue="" onChange={(e) => e.target.value && applyRound(e.target.value)}>

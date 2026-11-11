@@ -52,7 +52,7 @@ describe("drawScene", () => {
 
   it("el gol muestra ¡GOL!, el goleador, el minuto y el marcador", () => {
     const f = fakeCtx();
-    drawScene(f.ctx, "goal", input("broadcast", "horizontal", 2.5, { data: { ...DEFAULT_MATCH, player: "Pepe Pérez", minute: 77, homeScore: 3, awayScore: 1 } }));
+    drawScene(f.ctx, "goal", input("broadcast", "horizontal", 4.3, { data: { ...DEFAULT_MATCH, player: "Pepe Pérez", minute: 77, homeScore: 3, awayScore: 1 } }));
     expect(f.texts).toContain("¡GOL!");
     expect(f.texts).toContain("PEPE PÉREZ");
     expect(f.texts).toContain("77'");
@@ -239,31 +239,38 @@ describe("initials", () => {
   });
 });
 
-describe("marcadores de equipo", () => {
-  it("el gol del equipo muestra siglas, el reloj corriendo y luego el resultado", () => {
+describe("marcador del partido", () => {
+  const goalAt = (style: "compact" | "bar", t: number, over: Partial<SceneInput> = {}) => {
     const f = fakeCtx();
-    drawScene(f.ctx, "teamGoal", input("broadcast", "horizontal", 2, { data: { ...DEFAULT_MATCH, minute: 34 } }));
-    expect(f.texts).toContain("LEO");
-    expect(f.texts).toContain("G");
-    expect(f.texts).toContain("L");
-    expect(f.texts).toContain("34:02");
-    const later = fakeCtx();
-    drawScene(later.ctx, "teamGoal", input("broadcast", "horizontal", 4.8));
-    expect(later.texts).toContain("2-1");
-    expect(later.texts).not.toContain("G");
-  });
-  it("si anota el visitante usa sus siglas", () => {
-    const f = fakeCtx();
-    drawScene(f.ctx, "teamGoal", input("broadcast", "horizontal", 2, { data: { ...DEFAULT_MATCH, side: "away" } }));
-    expect(f.texts).toContain("TIG");
-  });
-  it("la columna dibuja un marcador por equipo (máx. 12)", () => {
-    const f = fakeCtx();
-    drawScene(f.ctx, "teamBugs", input("broadcast", "vertical", 6));
-    for (const ab of ["LEO", "TIG", "AGU", "LOB", "BUH", "HAL"]) expect(f.texts).toContain(ab);
-    const many = Array.from({ length: 30 }, (_, k) => ({ name: `Equipo${String(k).padStart(2, "0")}`, color: "#112233", color2: "#FFFFFF" }));
-    const g = fakeCtx();
-    expect(() => drawScene(g.ctx, "teamBugs", input("broadcast", "vertical", 7, { data: { ...DEFAULT_MATCH, bugTeams: many } }))).not.toThrow();
+    drawScene(f.ctx, "teamGoal", input("broadcast", "horizontal", t, { scoreStyle: style, ...over }));
+    return f.texts;
+  };
+  for (const style of ["compact", "bar"] as const) {
+    it(`${style}: antes del gol muestra siglas, reloj y el resultado anterior`, () => {
+      const tx = goalAt(style, 0.3, { data: { ...DEFAULT_MATCH, minute: 34 } });
+      expect(tx).toEqual(expect.arrayContaining(["LEO", "TIG", "34:00", "1", "1"]));
+      expect(tx).not.toContain("2");
+    });
+    it(`${style}: durante el gol, la celda del que anota dice GOL y el resultado aún no cambia`, () => {
+      const tx = goalAt(style, 2.4);
+      expect(tx).toEqual(expect.arrayContaining(["G", "L", "TIG"]));
+      expect(tx).not.toContain("LEO");
+      expect(tx).not.toContain("2");
+    });
+    it(`${style}: después del gol regresan las siglas y aparece el resultado nuevo`, () => {
+      const tx = goalAt(style, 5.4);
+      expect(tx).toEqual(expect.arrayContaining(["LEO", "TIG", "2", "1"]));
+      expect(tx).not.toContain("G");
+    });
+    it(`${style}: si anota el visitante, GOL aparece en su celda`, () => {
+      const tx = goalAt(style, 2.4, { data: { ...DEFAULT_MATCH, side: "away" } });
+      expect(tx).toContain("LEO");
+      expect(tx).not.toContain("TIG");
+      expect(tx).toContain("G");
+    });
+  }
+  it("ya no existe la columna de marcadores de equipos", () => {
+    expect(TEMPLATES.some((t) => (t.id as string) === "teamBugs")).toBe(false);
   });
   it("los colores automáticos son estables y válidos; los inválidos se ignoran", () => {
     expect(autoTeamColors("Leones")).toEqual(autoTeamColors("Leones"));
@@ -285,7 +292,15 @@ describe("alineación y capas en vivo", () => {
       scoreboard: true, clock: "12:34", goal: { side: "home", t: 2 },
       lower: { kind: "yellow", side: "away", t: 2, text: "Luis", minute: 12 }, sponsor: { index: 0, t: 3 },
     });
-    expect(f.texts).toEqual(expect.arrayContaining(["12:34", "LEO", "AMARILLA · LUIS", "12'", "PATROCINADOR", "Tu patrocinador"]));
+    expect(f.texts).toEqual(expect.arrayContaining(["12:34", "TIG", "G", "AMARILLA · LUIS", "12'", "PATROCINADOR", "Tu patrocinador"]));
+  });
+  it("el gol en vivo se anima dentro del marcador, sin barra aparte", () => {
+    for (const scoreStyle of ["compact", "bar"] as const) {
+      const f = fakeCtx();
+      drawLiveOverlay(f.ctx, input("broadcast", "horizontal", 0, { scoreStyle }), { scoreboard: true, clock: "12:34", goal: { side: "home", t: 5.5 } });
+      expect(f.texts.filter((x) => x === "LEO")).toHaveLength(1);
+      expect(f.texts).toContain("2");
+    }
   });
   it("sin nada activo no dibuja texto", () => {
     const f = fakeCtx();

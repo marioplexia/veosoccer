@@ -43,10 +43,18 @@ export type FontSlot = (typeof FONT_SLOTS)[number]["key"];
 
 export type CustomColor = { id: string; name: string; hex: string };
 
+export type ScoreboardStyle = "compact" | "bar";
+export const SCOREBOARD_STYLES: { id: ScoreboardStyle; label: string; hint: string }[] = [
+  { id: "compact", label: "Compacto", hint: "Siglas con el color de cada equipo, tu logo entre los goles y el reloj abajo." },
+  { id: "bar", label: "Barra", hint: "Barra horizontal: logo en círculo, local, resultado, visitante y reloj." },
+];
+
 export type BrandSettings = {
   colors: Record<string, string>;
   palette: CustomColor[];
   fonts: Record<FontSlot, FontSpec>;
+  /** Solo Marca de Transmisión: diseño del marcador. */
+  scoreboard?: ScoreboardStyle;
 };
 
 export const MAX_PALETTE = 24;
@@ -78,6 +86,7 @@ export const DEFAULT_BRANDS: Record<BrandKind, BrandSettings> = {
       body: { family: "Inter", weight: 500, italic: false },
       numbers: { family: "Barlow Condensed", weight: 700, italic: false },
     },
+    scoreboard: "compact",
   },
 };
 
@@ -125,6 +134,7 @@ export function sanitizeBrand(kind: BrandKind, raw: unknown): BrandSettings {
   const rawFonts = (r.fonts && typeof r.fonts === "object" ? r.fonts : {}) as Record<string, unknown>;
   const fonts = Object.fromEntries(FONT_SLOTS.map((s) => [s.key, sanitizeFont(rawFonts[s.key], base.fonts[s.key])])) as Record<FontSlot, FontSpec>;
 
+  if (kind === "broadcast") return { colors, palette, fonts, scoreboard: r.scoreboard === "bar" ? "bar" : "compact" };
   return { colors, palette, fonts };
 }
 
@@ -171,6 +181,7 @@ export function broadcastFromTournament(t: BrandSettings): BrandSettings {
     },
     palette: [],
     fonts: { ...t.fonts },
+    scoreboard: "compact",
   };
 }
 

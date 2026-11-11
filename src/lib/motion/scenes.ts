@@ -1,4 +1,4 @@
-import type { BrandKind, BrandSettings, FontSpec } from "@/lib/brand";
+import type { BrandKind, BrandSettings, FontSpec, ScoreboardStyle } from "@/lib/brand";
 import { contrastRatio, hexToHsv, hexToRgb, hsvToHex, readableOn, rgbToHex } from "@/lib/color";
 import {
   abbreviation, clamp01, clockText, easeInCubic, easeInOutCubic, easeOutBack, easeOutBounce, easeOutCubic, lerp, progress,
@@ -20,7 +20,6 @@ export type MatchData = {
   standings: StandRow[];
   /** Colores de los equipos ("" = automático según el nombre). */
   homeColor: string; homeColor2: string; awayColor: string; awayColor2: string;
-  bugTeams: BugTeam[];
   lineup: { team: string; players: { number: number | null; name: string }[] };
   sponsors: { name: string; image?: string }[];
 };
@@ -67,14 +66,12 @@ export const DEFAULT_MATCH: MatchData = {
     pos: k + 1, team, played: 6, gd: 12 - k * 3, points: 16 - k * 1 - (k > 4 ? 2 : 0),
   })),
   homeColor: "", homeColor2: "", awayColor: "", awayColor2: "",
-  bugTeams: [["Leones", "#C8102E", "#1D4ED8"], ["Tigres", "#F59E0B", "#111827"], ["Águilas", "#1D4ED8", "#FFFFFF"], ["Lobos", "#4B5563", "#F43F5E"], ["Búhos", "#7C2D12", "#FACC15"], ["Halcones", "#0F766E", "#A7F3D0"]]
-    .map(([name, color, color2]) => ({ name, color, color2 })),
   lineup: { team: "Leones", players: ["Portero Uno", "Lateral Dos", "Central Tres", "Central Cuatro", "Lateral Cinco", "Medio Seis", "Medio Ocho", "Medio Diez", "Extremo Siete", "Delantero Nueve", "Extremo Once"].map((name, k) => ({ number: [1, 2, 3, 4, 5, 6, 8, 10, 7, 9, 11][k], name })) },
   sponsors: [{ name: "Tu patrocinador" }],
 };
 
-export type SceneId = "lineup" | "teamGoal" | "teamBugs" | "ident" | "matchday" | "matchup" | "totw" | "potw" | "results" | "standings" | "goal" | "halftime" | "fulltime" | "kickoff" | "yellow" | "red" | "substitution";
-export type FieldKey = "match" | "home" | "away" | "homeScore" | "awayScore" | "side" | "player" | "minute" | "playerOut" | "playerIn" | "round" | "subtitle" | "homeLogo" | "awayLogo" | "teamLogo" | "photo" | "teamTitle" | "awardTitle" | "label" | "formation" | "players" | "resultsPick" | "standingsPick" | "tableTitle" | "background" | "teamColors" | "bugTeamsPick" | "lineupPick";
+export type SceneId = "lineup" | "teamGoal" | "ident" | "matchday" | "matchup" | "totw" | "potw" | "results" | "standings" | "goal" | "halftime" | "fulltime" | "kickoff" | "yellow" | "red" | "substitution";
+export type FieldKey = "match" | "home" | "away" | "homeScore" | "awayScore" | "side" | "player" | "minute" | "playerOut" | "playerIn" | "round" | "subtitle" | "homeLogo" | "awayLogo" | "teamLogo" | "photo" | "teamTitle" | "awardTitle" | "label" | "formation" | "players" | "resultsPick" | "standingsPick" | "tableTitle" | "background" | "teamColors" | "lineupPick";
 
 export type TemplateDef = { id: SceneId; kind: BrandKind; label: string; description: string; duration: number; fields: FieldKey[]; format?: FormatId; poster?: number };
 
@@ -85,8 +82,7 @@ export const TEMPLATES: TemplateDef[] = [
   { id: "totw", kind: "tournament", label: "Equipo ideal", description: "Cancha con las tarjetas de los jugadores en su formación.", duration: 5, fields: ["teamTitle", "round", "formation", "players"], format: "portrait", poster: 4 },
   { id: "potw", kind: "tournament", label: "Jugador de la jornada", description: "Foto y nombre del jugador destacado.", duration: 5, fields: ["awardTitle", "label", "round", "player", "photo", "teamLogo"], format: "portrait", poster: 4 },
   { id: "lineup", kind: "broadcast", label: "Alineación", description: "Plantilla del equipo con dorsales, con el mismo movimiento que la tabla.", duration: 10, fields: ["lineupPick", "background"], poster: 5 },
-  { id: "teamGoal", kind: "broadcast", label: "Gol del equipo", description: "Marcador del equipo con sus colores y escudo: cae “GOL” letra por letra, corre el reloj y aparece el resultado.", duration: 6, fields: ["match", "home", "away", "homeScore", "awayScore", "side", "minute", "teamColors"], poster: 3 },
-  { id: "teamBugs", kind: "broadcast", label: "Marcadores de equipos", description: "Columna con el marcador de cada equipo, animándose uno tras otro.", duration: 8, fields: ["bugTeamsPick", "minute"], format: "vertical", poster: 5 },
+  { id: "teamGoal", kind: "broadcast", label: "Gol en el marcador", description: "El marcador del partido: el equipo que anota se pinta con su color, cae “GOL” letra por letra y se actualiza el resultado.", duration: 6, fields: ["match", "home", "away", "homeScore", "awayScore", "side", "minute", "teamColors"], poster: 2.4 },
   { id: "results", kind: "broadcast", label: "Resultados de la jornada", description: "Lista de resultados con escudos; sale con barrido de color y deja ver tu foto de fondo.", duration: 10, fields: ["resultsPick", "tableTitle", "background"], poster: 5 },
   { id: "standings", kind: "broadcast", label: "Tabla de posiciones", description: "Tabla con escudos y puntos, con el mismo movimiento que los resultados.", duration: 10, fields: ["standingsPick", "tableTitle", "background"], poster: 5 },
   { id: "goal", kind: "broadcast", label: "Gol", description: "¡GOL! con el goleador, el minuto y el marcador actualizado.", duration: 5.2, fields: ["match", "home", "away", "homeScore", "awayScore", "side", "player", "minute"] },
@@ -116,6 +112,8 @@ export type SceneInput = {
   images?: Record<string, SceneImage>;
   /** Paleta de identidad (Marca del Torneo). Si existe, los paneles de color animados la usan. */
   palette?: string[];
+  /** Diseño del marcador (Marca de Transmisión). Por defecto, compacto. */
+  scoreStyle?: ScoreboardStyle;
   tournamentName: string;
   data: MatchData;
 };
@@ -169,74 +167,226 @@ function drawLogo(ctx: Ctx, i: SceneInput, cx: number, cy: number, maxW: number,
 
 /* ───────────── marcador ───────────── */
 
-function scoreboard(ctx: Ctx, i: SceneInput, box: { x: number; y: number; w: number; h: number }, o: { clock: string; popSide?: "home" | "away"; pop?: number }) {
+/** Gol en curso dentro del marcador: `t` son los segundos desde el gol. */
+export type GoalAnim = { side: "home" | "away"; t: number };
+/** Momento (s) en que el marcador deja de decir GOL y muestra el resultado nuevo. */
+export const GOAL_REVEAL = 3.7;
+
+type Box = { x: number; y: number; w: number; h: number };
+
+function sideTeam(i: SceneInput, side: "home" | "away"): BugTeam {
+  const d = i.data;
+  const home = side === "home";
+  const name = home ? d.home : d.away;
+  return { name, ...resolveTeamColors(name, home ? d.homeColor : d.awayColor, home ? d.homeColor2 : d.awayColor2), crest: home ? "homeLogo" : "awayLogo" };
+}
+
+/** Resultado que se muestra: antes del GOAL_REVEAL el equipo que anota aún tiene un gol menos. */
+function shownScore(i: SceneInput, side: "home" | "away", goal?: GoalAnim) {
+  const v = side === "home" ? i.data.homeScore : i.data.awayScore;
+  if (!goal || goal.side !== side) return { value: v, scale: 1 };
+  if (goal.t < GOAL_REVEAL) return { value: Math.max(0, v - 1), scale: 1 };
+  return { value: v, scale: 1 + 0.3 * (1 - easeOutBounce(progress(goal.t, GOAL_REVEAL, GOAL_REVEAL + 0.7))) };
+}
+
+/** “GOL” letra por letra (la O es un balón) dentro de una celda; `tl` = segundos desde el gol. */
+function goalWord(ctx: Ctx, i: SceneInput, cx: number, cy: number, cellW: number, cellH: number, tl: number, ink: string, ballLine: string) {
+  const out = easeInCubic(progress(tl, GOAL_REVEAL, GOAL_REVEAL + 0.35));
+  if (out >= 1) return;
+  const lp = Math.min(cellH * 0.78, cellW * 0.34);
+  ctx.font = fontStr(i.fonts.heading, lp);
+  const wG = ctx.measureText("G").width, wL = ctx.measureText("L").width;
+  const wO = lp * 0.78, gap = lp * 0.06;
+  const total = wG + wO + wL + gap * 2;
+  const xs = [cx - total / 2 + wG / 2, cx - total / 2 + wG + gap + wO / 2, cx + total / 2 - wL / 2];
+  ["G", "O", "L"].forEach((ch, k) => {
+    const p = progress(tl, 0.4 + k * 0.13, 0.9 + k * 0.13);
+    if (p <= 0) return;
+    const drop = (1 - easeOutBounce(p)) * -cellH * 1.2;
+    const pulse = tl > 1.4 ? 1 + 0.07 * Math.sin((tl - 1.4) * 7) : 1;
+    ctx.save();
+    ctx.translate(xs[k], cy + drop - out * cellH * 1.1);
+    ctx.scale(pulse, pulse);
+    if (ch === "O") ball(ctx, 0, 0, wO * 0.46, tl * 5, ballLine);
+    else text(ctx, ch, 0, 0, i.fonts.heading, lp, ink);
+    ctx.restore();
+  });
+}
+
+/**
+ * Celda con las siglas del equipo. Con gol: se pinta con el color del equipo, las siglas
+ * suben, cae “GOL” y al final regresan las siglas.
+ */
+function teamCell(ctx: Ctx, i: SceneInput, r: Box, team: BugTeam, base: { bg: string; ink: string }, goal: number | null, px: number) {
+  const { x, y, w, h } = r;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+  ctx.fillStyle = base.bg; ctx.fillRect(x, y, w, h);
+  const active = goal != null && goal >= 0 && goal < GOAL_REVEAL + 0.8;
+  let dy = 0;
+  if (active) {
+    const tl = goal!;
+    // barrido con el color del equipo (entra de izquierda; al revelar el resultado sale hacia la derecha)
+    const inW = easeOutCubic(progress(tl, 0, 0.3));
+    const outX = easeInCubic(progress(tl, GOAL_REVEAL + 0.05, GOAL_REVEAL + 0.35));
+    if (team.color.toUpperCase() !== base.bg.toUpperCase()) {
+      ctx.fillStyle = team.color;
+      ctx.fillRect(x + w * outX, y, w * inW * (1 - outX), h);
+    }
+    // destello blanco al arrancar
+    const flash = 1 - progress(tl, 0, 0.35);
+    if (flash > 0) { ctx.fillStyle = `rgba(255,255,255,${(0.85 * flash).toFixed(3)})`; ctx.fillRect(x, y, w, h); }
+    const lineOn = contrastRatio(team.color, "#FFFFFF") >= 2.5 ? team.color : readableOn(team.color);
+    goalWord(ctx, i, x + w / 2, y + h / 2, w, h, tl, readableOn(team.color), lineOn);
+    // siglas: suben al empezar el gol y regresan desde abajo cuando ya salió el color
+    dy = tl < GOAL_REVEAL ? -easeInCubic(progress(tl, 0.15, 0.4)) * h * 1.1 : (1 - easeOutCubic(progress(tl, GOAL_REVEAL + 0.3, GOAL_REVEAL + 0.7))) * h * 1.1;
+  }
+  const ink = base.ink;
+  if (Math.abs(dy) < h * 1.05) text(ctx, abbreviation(team.name, "EQU"), x + w / 2, y + h / 2 + dy, i.fonts.heading, px, ink, { maxW: w * 0.84 });
+  ctx.restore();
+}
+
+/** Brillo diagonal que cruza el marcador. */
+function shine(ctx: Ctx, r: Box, p: number) {
+  if (p <= 0 || p >= 1) return;
+  const sx = r.x - r.w * 0.2 + p * r.w * 1.4;
+  const g = ctx.createLinearGradient(sx - r.h, 0, sx + r.h, 0);
+  g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(0.5, "rgba(255,255,255,.45)"); g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.save(); ctx.fillStyle = g;
+  ctx.beginPath(); ctx.moveTo(sx - r.h * 0.9, r.y + r.h); ctx.lineTo(sx - r.h * 0.1, r.y); ctx.lineTo(sx + r.h * 0.9, r.y); ctx.lineTo(sx + r.h * 0.1, r.y + r.h); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function scoreNumber(ctx: Ctx, i: SceneInput, s: { value: number; scale: number }, cx: number, cy: number, px: number, color: string, stroke?: string) {
+  ctx.save(); ctx.translate(cx, cy); ctx.scale(s.scale, s.scale);
+  text(ctx, String(s.value), 0, 0, i.fonts.numbers, px, color, stroke ? { stroke, strokeW: px * 0.12 } : {});
+  ctx.restore();
+}
+
+/** Estilo compacto: siglas en el color de cada equipo, logo del torneo entre los goles y el reloj abajo. */
+function compactScoreboard(ctx: Ctx, i: SceneInput, box: Box, o: { clock: string; goal?: GoalAnim }) {
+  const c = i.colors;
+  const { x, y, w, h } = box;
+  const home = sideTeam(i, "home"), away = sideTeam(i, "away");
+  const cellW = w * 0.3, midW = w - cellW * 2;
+  const mx = x + cellW, mcx = x + w / 2, mid = y + h / 2;
+  const rad = h * 0.12;
+
+  // pestaña del reloj (debajo del centro)
+  const tabW = midW * 0.9, tabTop = y + h * 0.5, tabH = h * 1.05;
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = h * 0.3; ctx.shadowOffsetY = h * 0.06;
+  ctx.fillStyle = c.clockBg;
+  rr(ctx, mcx - tabW / 2, tabTop, tabW, tabH, rad); ctx.fill();
+  ctx.restore();
+  text(ctx, o.clock, mcx, y + h * 1.29, i.fonts.numbers, h * 0.46, c.clockText, { maxW: tabW * 0.86 });
+
+  // barra superior: celdas de equipo + centro
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = h * 0.3; ctx.shadowOffsetY = h * 0.06;
+  ctx.fillStyle = c.scoreBg;
+  rr(ctx, x, y, w, h, rad); ctx.fill();
+  ctx.restore();
+  ctx.save();
+  rr(ctx, x, y, w, h, rad); ctx.clip();
+  ctx.fillStyle = c.scoreBg; ctx.fillRect(mx, y, midW, h);
+  const gl = (side: "home" | "away") => (o.goal && o.goal.side === side ? o.goal.t : null);
+  teamCell(ctx, i, { x, y, w: cellW, h }, home, { bg: home.color, ink: readableOn(home.color) }, gl("home"), h * 0.62);
+  teamCell(ctx, i, { x: x + w - cellW, y, w: cellW, h }, away, { bg: away.color, ink: readableOn(away.color) }, gl("away"), h * 0.62);
+  if (o.goal) { shine(ctx, box, progress(o.goal.t, 0.25, 0.85)); shine(ctx, box, progress(o.goal.t, GOAL_REVEAL, GOAL_REVEAL + 0.6)); }
+  ctx.restore();
+
+  // goles a cada lado del logo
+  const numPx = h * 0.86;
+  const nx = midW * 0.3;
+  scoreNumber(ctx, i, shownScore(i, "home", o.goal), mcx - nx, mid, numPx, c.scoreText);
+  scoreNumber(ctx, i, shownScore(i, "away", o.goal), mcx + nx, mid, numPx, c.scoreText);
+
+  // logo del torneo al centro, sobresaliendo (rebota con el gol)
+  const bounce = o.goal ? 1 + 0.22 * Math.sin(Math.PI * progress(o.goal.t, 0.3, 0.75)) + 0.18 * Math.sin(Math.PI * progress(o.goal.t, GOAL_REVEAL, GOAL_REVEAL + 0.45)) : 1;
+  const ls = h * 1.25 * bounce;
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = h * 0.2;
+  if (!drawLogo(ctx, i, mcx, mid + h * 0.05, ls * 0.8, ls)) {
+    ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(mcx, mid, ls * 0.36, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowColor = "transparent";
+    text(ctx, initials(i.tournamentName), mcx, mid, i.fonts.heading, ls * 0.26, c.scoreBg, { maxW: ls * 0.56 });
+  }
+  ctx.restore();
+}
+
+/** Estilo barra: logo en círculo | local | franja | resultado | franja | visitante | reloj. */
+function barScoreboard(ctx: Ctx, i: SceneInput, box: Box, o: { clock: string; goal?: GoalAnim }) {
   const c = i.colors;
   const { x, y, w, h } = box;
   const logoD = h * 1.3;
   const startX = x + logoD * 0.55;
   const rest = w - logoD * 0.55;
-  const cell = (frac: number) => rest * frac;
-  const widths = [cell(0.3), cell(0.02), cell(0.17), cell(0.02), cell(0.29), cell(0.2)];
+  const widths = [0.3, 0.02, 0.17, 0.02, 0.29, 0.2].map((f) => rest * f);
   const xs: number[] = [];
   widths.reduce((acc, wd) => { xs.push(acc); return acc + wd; }, startX);
+  const inner: Box = { x: startX, y, w: rest, h };
 
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,.35)";
-  ctx.shadowBlur = h * 0.3;
-  ctx.shadowOffsetY = h * 0.08;
+  ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = h * 0.3; ctx.shadowOffsetY = h * 0.08;
   ctx.fillStyle = c.barBg;
-  rr(ctx, startX, y, rest, h, h * 0.08);
-  ctx.fill();
+  rr(ctx, startX, y, rest, h, h * 0.08); ctx.fill();
   ctx.restore();
 
   ctx.save();
-  rr(ctx, startX, y, rest, h, h * 0.08);
-  ctx.clip();
+  rr(ctx, startX, y, rest, h, h * 0.08); ctx.clip();
   const fills = [c.barBg, c.homeStripe, c.scoreBg, c.awayStripe, c.barBg, c.clockBg];
   widths.forEach((wd, k) => { ctx.fillStyle = fills[k]; ctx.fillRect(xs[k], y, wd + 1, h); });
+  const gl = (side: "home" | "away") => (o.goal && o.goal.side === side ? o.goal.t : null);
+  const pad = logoD * 0.45;
+  teamCell(ctx, i, { x: xs[0] + pad, y, w: widths[0] - pad, h }, sideTeam(i, "home"), { bg: c.barBg, ink: c.barText }, gl("home"), h * 0.55);
+  teamCell(ctx, i, { x: xs[4], y, w: widths[4], h }, sideTeam(i, "away"), { bg: c.barBg, ink: c.barText }, gl("away"), h * 0.55);
+  if (o.goal) { shine(ctx, inner, progress(o.goal.t, 0.25, 0.85)); shine(ctx, inner, progress(o.goal.t, GOAL_REVEAL, GOAL_REVEAL + 0.6)); }
   ctx.restore();
 
   const mid = y + h / 2;
-  text(ctx, abbreviation(i.data.home, "LOC"), xs[0] + widths[0] / 2 + logoD * 0.1, mid, i.fonts.heading, h * 0.55, c.barText, { maxW: widths[0] * 0.8 });
-  text(ctx, abbreviation(i.data.away, "VIS"), xs[4] + widths[4] / 2, mid, i.fonts.heading, h * 0.55, c.barText, { maxW: widths[4] * 0.8 });
-
-  // resultado, con "rebote" en el lado que anotó
   const scoreCx = xs[2] + widths[2] / 2;
-  const popK = o.pop ?? 0;
-  const s = (side: "home" | "away") => (o.popSide === side ? 1 + 0.45 * popK : 1);
-  ctx.save();
-  ctx.fillStyle = c.scoreText;
   const px = fitPx(ctx, "00 - 00", i.fonts.numbers, h * 0.66, widths[2] * 0.9);
   const gap = px * 0.95;
-  ctx.save(); ctx.translate(scoreCx - gap * 0.55, mid); ctx.scale(s("home"), s("home"));
-  text(ctx, String(i.data.homeScore), 0, 0, i.fonts.numbers, px, c.scoreText); ctx.restore();
+  scoreNumber(ctx, i, shownScore(i, "home", o.goal), scoreCx - gap * 0.55, mid, px, c.scoreText);
   text(ctx, "-", scoreCx, mid, i.fonts.numbers, px, c.scoreText);
-  ctx.save(); ctx.translate(scoreCx + gap * 0.55, mid); ctx.scale(s("away"), s("away"));
-  text(ctx, String(i.data.awayScore), 0, 0, i.fonts.numbers, px, c.scoreText); ctx.restore();
-  ctx.restore();
+  scoreNumber(ctx, i, shownScore(i, "away", o.goal), scoreCx + gap * 0.55, mid, px, c.scoreText);
 
   text(ctx, o.clock, xs[5] + widths[5] / 2, mid, i.fonts.numbers, h * 0.62, c.clockText, { maxW: widths[5] * 0.85 });
 
-  // logo en círculo
   const lcx = x + logoD / 2;
+  const bounce = o.goal ? 1 + 0.2 * Math.sin(Math.PI * progress(o.goal.t, 0.3, 0.75)) : 1;
+  const r = (logoD / 2) * bounce;
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = h * 0.25;
   ctx.fillStyle = "#fff";
-  ctx.beginPath(); ctx.arc(lcx, mid, logoD / 2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(lcx, mid, r, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
   ctx.save();
-  ctx.beginPath(); ctx.arc(lcx, mid, logoD / 2, 0, Math.PI * 2); ctx.clip();
-  if (!drawLogo(ctx, i, lcx, mid, logoD * 0.72, logoD * 0.72)) {
-    text(ctx, i.tournamentName.slice(0, 1).toUpperCase() || "•", lcx, mid, i.fonts.heading, logoD * 0.5, c.barText);
+  ctx.beginPath(); ctx.arc(lcx, mid, r, 0, Math.PI * 2); ctx.clip();
+  if (!drawLogo(ctx, i, lcx, mid, r * 1.44, r * 1.44)) {
+    text(ctx, i.tournamentName.slice(0, 1).toUpperCase() || "•", lcx, mid, i.fonts.heading, r, c.barText);
   }
   ctx.restore();
 }
 
+/** Marcador del partido en el estilo elegido en la Marca de Transmisión. `box.h` es la altura de la barra. */
+function scoreboard(ctx: Ctx, i: SceneInput, box: Box, o: { clock: string; goal?: GoalAnim }) {
+  if (i.scoreStyle === "bar") barScoreboard(ctx, i, box, o);
+  else compactScoreboard(ctx, i, box, o);
+}
+
+/** Proporción ancho/alto de la barra según el estilo. */
+const boardRatio = (i: SceneInput) => (i.scoreStyle === "bar" ? 13 : 7.5);
+/** Altura total (barra + reloj del compacto) en múltiplos de la altura de la barra. */
+const boardDepth = (i: SceneInput) => (i.scoreStyle === "bar" ? 1 : 1.55);
+
 function scoreboardBox(i: SceneInput) {
   const u = Math.min(i.w, i.h) / 1080;
-  const w = Math.min(i.w * 0.94, 1500 * u);
-  const h = Math.max(64 * u, Math.min(110 * u, w / 14));
-  return { x: (i.w - w) / 2, y: i.h - h - i.h * 0.07, w, h };
+  const bar = i.scoreStyle === "bar";
+  const w = bar ? Math.min(i.w * 0.94, 1500 * u) : Math.min(i.w * 0.8, 860 * u);
+  const h = bar ? Math.max(64 * u, Math.min(110 * u, w / 14)) : w / boardRatio(i);
+  return { x: (i.w - w) / 2, y: i.h - h * boardDepth(i) - i.h * 0.07, w, h };
 }
 
 /* ───────────── rótulo (jugador + minuto) ───────────── */
@@ -488,14 +638,14 @@ function slam(ctx: Ctx, i: SceneInput, word: string, start: number, cy: number, 
   ctx.restore();
 }
 
-function drawScoreboardIn(ctx: Ctx, i: SceneInput, inAt: number, outAt: number, d: number, o: { clock: string; popSide?: "home" | "away"; popAt?: number }) {
+function drawScoreboardIn(ctx: Ctx, i: SceneInput, inAt: number, outAt: number, d: number, o: { clock: string; goalSide?: "home" | "away"; goalAt?: number }) {
   const b = scoreboardBox(i);
   const inP = easeOutCubic(progress(i.t, inAt, inAt + 0.5));
   const outP = easeInCubic(progress(i.t, outAt, d));
-  const dy = (1 - inP + outP) * (b.h * 2.4);
-  const pop = o.popAt != null && i.t >= o.popAt ? 1 - easeOutBounce(progress(i.t, o.popAt, o.popAt + 0.6)) : 0;
+  const dy = (1 - inP + outP) * (b.h * boardDepth(i) * 2.4);
+  const goal = o.goalSide && o.goalAt != null && i.t >= o.goalAt ? { side: o.goalSide, t: i.t - o.goalAt } : undefined;
   ctx.save(); ctx.translate(0, dy); ctx.globalAlpha = inP * (1 - outP);
-  scoreboard(ctx, i, b, { clock: o.clock, popSide: o.popSide, pop });
+  scoreboard(ctx, i, b, { clock: o.clock, goal });
   ctx.restore();
 }
 
@@ -549,7 +699,7 @@ function sceneGoal(ctx: Ctx, i: SceneInput) {
 
   const b = scoreboardBox(i);
   lowerThird(ctx, i, b.y - 104 * u - 56 * u, progress(t, 1.15, 1.7) * (1 - progress(t, outAt, D)), data.player, `${Math.round(data.minute)}'`);
-  drawScoreboardIn(ctx, i, 1.45, outAt, D, { clock: clockText(data.minute), popSide: data.side, popAt: 1.95 });
+  drawScoreboardIn(ctx, i, 1.2, outAt, D, { clock: clockText(data.minute), goalSide: data.side, goalAt: 0 });
 }
 
 function versus(ctx: Ctx, i: SceneInput, middle: string, midFont: FontSpec, midPx: number) {
@@ -1207,132 +1357,6 @@ function ball(ctx: Ctx, cx: number, cy: number, r: number, rot: number, line: st
   ctx.restore();
 }
 
-/**
- * Marcador de un equipo: siglas | franja en zigzag | escudo | GOL, con el reloj debajo.
- * `tl` es el tiempo local desde que entra la barra. `after` (0-1) cambia GOL por el resultado.
- */
-export function teamBug(ctx: Ctx, i: SceneInput, cx: number, top: number, W: number, team: BugTeam, tl: number, o: { clock: string; score?: string; after?: number }) {
-  const H = W * 0.105;
-  const x0 = cx - W / 2;
-  const c = i.colors;
-  const txt = readableOn(team.color);
-  const inP = easeOutCubic(progress(tl, 0, 0.35));
-  if (inP <= 0) return;
-
-  // reloj (sale de detrás de la barra)
-  const tabW = W * 0.27, tabH = H * 0.82;
-  const tabCx = x0 + W * 0.43;
-  const tabP = easeOutCubic(progress(tl, 0.25, 0.6));
-  ctx.save();
-  ctx.translate(0, (tabP - 1) * tabH);
-  ctx.fillStyle = c.scoreBg;
-  ctx.beginPath();
-  const r = tabH * 0.22;
-  ctx.moveTo(tabCx - tabW / 2, top + H - 2);
-  ctx.lineTo(tabCx + tabW / 2, top + H - 2);
-  ctx.lineTo(tabCx + tabW / 2, top + H + tabH - r);
-  ctx.arcTo(tabCx + tabW / 2, top + H + tabH, tabCx + tabW / 2 - r, top + H + tabH, r);
-  ctx.lineTo(tabCx - tabW / 2 + r, top + H + tabH);
-  ctx.arcTo(tabCx - tabW / 2, top + H + tabH, tabCx - tabW / 2, top + H + tabH - r, r);
-  ctx.closePath(); ctx.fill();
-  text(ctx, o.clock, tabCx, top + H + tabH * 0.55, i.fonts.numbers, tabH * 0.68, c.clockText, { maxW: tabW * 0.9 });
-  ctx.restore();
-
-  // barra (se abre desde el centro)
-  ctx.save();
-  ctx.translate(cx, 0); ctx.scale(inP, 1); ctx.translate(-cx, 0);
-  ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,.22)"; ctx.shadowBlur = H * 0.35; ctx.shadowOffsetY = H * 0.08;
-  ctx.fillStyle = team.color;
-  rr(ctx, x0, top, W, H, H * 0.08); ctx.fill();
-  ctx.restore();
-  ctx.save();
-  rr(ctx, x0, top, W, H, H * 0.08); ctx.clip();
-  // lado de GOL un poco más claro para separar
-  const g = ctx.createLinearGradient(x0 + W * 0.45, 0, x0 + W, 0);
-  g.addColorStop(0, "rgba(255,255,255,.0)"); g.addColorStop(1, "rgba(255,255,255,.12)");
-  ctx.fillStyle = g; ctx.fillRect(x0 + W * 0.45, top, W * 0.55, H);
-  // franja en zigzag (rayo) con el segundo color
-  const b = x0 + W * 0.3, bw = W * 0.13;
-  const bolt = (dx: number, col: string) => {
-    ctx.fillStyle = col;
-    ctx.beginPath();
-    ctx.moveTo(b + dx, top); ctx.lineTo(b + dx + bw * 0.62, top);
-    ctx.lineTo(b + dx + bw * 0.42, top + H * 0.46); ctx.lineTo(b + dx + bw, top + H * 0.46);
-    ctx.lineTo(b + dx + bw * 0.78, top + H); ctx.lineTo(b + dx + bw * 0.16, top + H);
-    ctx.lineTo(b + dx + bw * 0.36, top + H * 0.56); ctx.lineTo(b + dx - bw * 0.1, top + H * 0.56);
-    ctx.closePath(); ctx.fill();
-  };
-  bolt(bw * 0.18, mix(team.color2, "#000000", 0.25));
-  bolt(0, team.color2);
-  // brillo que cruza la barra de vez en cuando
-  for (const at of [1.25, 2.7, 4.2]) {
-    const sp = progress(tl, at, at + 0.55);
-    if (sp <= 0 || sp >= 1) continue;
-    const sx = x0 - W * 0.2 + sp * W * 1.4;
-    const sg = ctx.createLinearGradient(sx - W * 0.08, 0, sx + W * 0.08, 0);
-    sg.addColorStop(0, "rgba(255,255,255,0)"); sg.addColorStop(0.5, "rgba(255,255,255,.4)"); sg.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = sg;
-    ctx.beginPath(); ctx.moveTo(sx - W * 0.06, top + H); ctx.lineTo(sx, top); ctx.lineTo(sx + W * 0.06, top); ctx.lineTo(sx, top + H); ctx.closePath(); ctx.fill();
-  }
-  ctx.restore();
-
-  // siglas
-  text(ctx, abbreviation(team.name, "EQU"), x0 + W * 0.155, top + H / 2, i.fonts.heading, H * 0.66, txt, { maxW: W * 0.26 });
-
-  // GOL letra por letra (la O es un balón), luego el resultado
-  const after = clamp01(o.after ?? 0);
-  const gx = x0 + W * 0.74;
-  const lp = H * 0.74;
-  ctx.save();
-  ctx.beginPath(); ctx.rect(x0 + W * 0.45, top, W * 0.55, H); ctx.clip();
-  if (after < 1) {
-    ctx.font = fontStr(i.fonts.heading, lp);
-    const wG = ctx.measureText("G").width, wL = ctx.measureText("L").width;
-    const wO = lp * 0.78;
-    const gap = lp * 0.06;
-    const total = wG + wO + wL + gap * 2;
-    const xs = [gx - total / 2 + wG / 2, gx - total / 2 + wG + gap + wO / 2, gx + total / 2 - wL / 2];
-    ["G", "O", "L"].forEach((ch, k) => {
-      const p = progress(tl, 0.55 + k * 0.13, 1.05 + k * 0.13);
-      if (p <= 0) return;
-      const drop = (1 - easeOutBounce(p)) * -H * 1.2;
-      const pulse = 1 + 0.06 * Math.sin(Math.max(0, tl - 1.5) * 6) * (tl > 1.5 ? 1 : 0);
-      ctx.save();
-      ctx.translate(xs[k], top + H / 2 + drop - after * H);
-      ctx.scale(pulse, pulse);
-      ctx.globalAlpha = 1 - after;
-      // En barras claras el balón usa el color del texto para no perderse sobre el fondo.
-      if (ch === "O") ball(ctx, 0, 0, wO * 0.46, tl * 5, contrastRatio(team.color, "#FFFFFF") >= 2.5 ? team.color : txt);
-      else text(ctx, ch, 0, 0, i.fonts.heading, lp, txt);
-      ctx.restore();
-    });
-  }
-  if (after > 0 && o.score) {
-    ctx.save(); ctx.translate(0, (1 - easeOutCubic(after)) * H);
-    text(ctx, o.score, gx, top + H / 2, i.fonts.numbers, H * 0.72, txt, { maxW: W * 0.4 });
-    ctx.restore();
-  }
-  ctx.restore();
-
-  // escudo al centro (rebota al anotar)
-  const bounce = 1 + 0.18 * Math.sin(Math.PI * progress(tl, 0.5, 0.9));
-  const cs = H * 1.32 * bounce;
-  const ccx = x0 + W * 0.465, ccy = top + H / 2;
-  const im = team.crest ? i.images?.[team.crest] : undefined;
-  ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,.25)"; ctx.shadowBlur = H * 0.2;
-  if (im) contain(ctx, im, ccx, ccy, cs, cs);
-  else {
-    ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(ccx, ccy, cs * 0.44, 0, Math.PI * 2); ctx.fill();
-    ctx.shadowColor = "transparent";
-    ctx.fillStyle = team.color; ctx.beginPath(); ctx.arc(ccx, ccy, cs * 0.36, 0, Math.PI * 2); ctx.fill();
-    text(ctx, initials(team.name), ccx, ccy, i.fonts.heading, cs * 0.28, readableOn(team.color), { maxW: cs * 0.6 });
-  }
-  ctx.restore();
-  ctx.restore();
-}
-
 function lightBackdrop(ctx: Ctx, i: SceneInput) {
   const g = ctx.createLinearGradient(0, 0, 0, i.h);
   g.addColorStop(0, "#F7F7F9"); g.addColorStop(1, "#E4E4EA");
@@ -1347,51 +1371,20 @@ function liveClock(minute: number, t: number) {
 
 function sceneTeamGoal(ctx: Ctx, i: SceneInput) {
   const { w, h, t, data } = i;
-  const u = Math.min(w, h) / 1080;
   const D = 6;
   lightBackdrop(ctx, i);
-  const home = data.side === "home";
-  const name = home ? data.home : data.away;
-  const col = resolveTeamColors(name, home ? data.homeColor : data.awayColor, home ? data.homeColor2 : data.awayColor2);
-  const team: BugTeam = { name, ...col, crest: home ? "homeLogo" : "awayLogo" };
-  const W = Math.min(w * 0.86, 1250 * u);
+  const bar = i.scoreStyle === "bar";
+  const bw = bar ? Math.min(w * 0.92, h * 1.6) : Math.min(w * 0.86, h * 1.25);
+  const bh = bw / (bar ? 12 : boardRatio(i));
+  const box = { x: (w - bw) / 2, y: h / 2 - (bh * boardDepth(i)) / 2, w: bw, h: bh };
+  const inP = easeOutBack(progress(t, 0, 0.5));
   const outP = easeInCubic(progress(t, D - 0.6, D - 0.05));
+  const s = Math.max(0.001, inP * (1 - outP * 0.3));
   ctx.save();
-  ctx.translate(w / 2, h * 0.45); ctx.scale(1 - outP, 1 - outP * 0.3); ctx.translate(-w / 2, -h * 0.45);
-  ctx.globalAlpha = 1 - outP;
-  teamBug(ctx, i, w / 2, h * 0.45 - W * 0.06, W, team, t - 0.1, {
-    clock: liveClock(data.minute, t),
-    score: `${data.homeScore}-${data.awayScore}`,
-    after: easeInOutCubic(progress(t, 3.7, 4.2)),
-  });
+  ctx.translate(w / 2, h / 2); ctx.scale(s, s); ctx.translate(-w / 2, -h / 2);
+  ctx.globalAlpha = clamp01(progress(t, 0, 0.25)) * (1 - outP);
+  scoreboard(ctx, i, box, { clock: liveClock(data.minute, t), goal: { side: data.side, t: t - 0.6 } });
   ctx.restore();
-}
-
-function sceneTeamBugs(ctx: Ctx, i: SceneInput) {
-  const { w, h, t, data } = i;
-  const u = Math.min(w, h) / 1080;
-  const D = 8;
-  lightBackdrop(ctx, i);
-  const teams = data.bugTeams.slice(0, 12);
-  const n = Math.max(1, teams.length);
-  const horizontal = w >= h;
-  const logoS = (horizontal ? 150 : 170) * u;
-  const topPad = h * (horizontal ? 0.06 : 0.1);
-  const avail = h - topPad - h * 0.05;
-  const rowH = avail / n;
-  const W = Math.min(w * (horizontal ? 0.5 : 0.62), (rowH / 0.2) * 1.0, 1000 * u);
-  const cx = horizontal ? w * 0.55 : w * 0.55;
-  const outP = easeInCubic(progress(t, D - 0.6, D - 0.05));
-  ctx.save(); ctx.globalAlpha = (1 - outP) * easeOutCubic(progress(t, 0, 0.5));
-  leagueLogo(ctx, i, horizontal ? w * 0.14 : w * 0.13, topPad + logoS * 0.6, logoS);
-  ctx.restore();
-  teams.forEach((tm, k) => {
-    const start = 0.2 + k * 0.28;
-    const top = topPad + k * rowH + (rowH - W * 0.105 * 1.85) / 2;
-    ctx.save(); ctx.globalAlpha = 1 - outP;
-    teamBug(ctx, i, cx, top, W, tm, t - start, { clock: liveClock(data.minute, t) });
-    ctx.restore();
-  });
 }
 
 function sceneLineup(ctx: Ctx, i: SceneInput) {
@@ -1425,20 +1418,17 @@ export type LiveOverlay = {
 export function drawLiveOverlay(ctx: Ctx, i: SceneInput, o: LiveOverlay) {
   const { w, h, data } = i;
   const u = Math.min(w, h) / 1080;
-  if (o.scoreboard) {
-    const sw = Math.min(w * 0.46, 760 * u);
-    scoreboard(ctx, i, { x: w * 0.03, y: h * 0.04, w: sw, h: Math.max(48 * u, sw / 13) }, { clock: o.clock });
-  }
-  if (o.goal) {
-    const home = o.goal.side === "home";
-    const name = home ? data.home : data.away;
-    const col = resolveTeamColors(name, home ? data.homeColor : data.awayColor, home ? data.homeColor2 : data.awayColor2);
-    const W = Math.min(w * 0.7, 1100 * u);
-    const out = easeInCubic(progress(o.goal.t, 5.4, 6));
-    ctx.save(); ctx.globalAlpha = 1 - out;
-    teamBug(ctx, i, w / 2, h * 0.7, W, { name, ...col, crest: home ? "homeLogo" : "awayLogo" }, o.goal.t, {
-      clock: o.clock, score: `${data.homeScore}-${data.awayScore}`, after: easeInOutCubic(progress(o.goal.t, 3.7, 4.2)),
-    });
+  if (o.scoreboard || o.goal) {
+    // Marcador arriba a la izquierda; el gol se anima dentro de él.
+    const bar = i.scoreStyle === "bar";
+    const sw = bar ? Math.min(w * 0.46, 760 * u) : Math.min(w * 0.36, 560 * u);
+    const sh = bar ? Math.max(48 * u, sw / 13) : sw / boardRatio(i);
+    const goal = o.goal && o.goal.t < GOAL_REVEAL + 1 ? o.goal : undefined;
+    const k = goal ? 1 + 0.12 * Math.sin(Math.PI * progress(goal.t, 0, 0.5)) : 1;
+    const bx = w * 0.03, by = h * 0.04 + (bar ? 0 : sh * 0.1);
+    ctx.save();
+    ctx.translate(bx, by); ctx.scale(k, k); ctx.translate(-bx, -by);
+    scoreboard(ctx, i, { x: bx, y: by, w: sw, h: sh }, { clock: o.clock, goal });
     ctx.restore();
   }
   if (o.lower) {
@@ -1481,7 +1471,6 @@ export function drawScene(ctx: Ctx, id: SceneId, input: SceneInput) {
     case "potw": scenePotw(ctx, input); break;
     case "lineup": sceneLineup(ctx, input); break;
     case "teamGoal": sceneTeamGoal(ctx, input); break;
-    case "teamBugs": sceneTeamBugs(ctx, input); break;
     case "results": sceneResults(ctx, input); break;
     case "standings": sceneStandings(ctx, input); break;
     case "goal": sceneGoal(ctx, input); break;
