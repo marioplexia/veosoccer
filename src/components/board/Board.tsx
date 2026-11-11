@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { sanitizeBrand, type BrandKind } from "@/lib/brand";
-import type { BrandRow, Division, Fixture, Goal, Player, Team, Tournament, Venue } from "@/lib/types";
+import type { BrandRow, BroadcastSettingsView, Division, Fixture, Goal, Player, Sponsor, Team, Tournament, Venue } from "@/lib/types";
+import TransmitTab from "./TransmitTab";
 import BrandEditor from "@/components/brand/BrandEditor";
 import CalendarTab from "./CalendarTab";
 import ImportTab from "./ImportTab";
@@ -21,6 +22,8 @@ export type BoardData = {
   goals: Goal[];
   brands: BrandRow[];
   players: Player[];
+  sponsors: Sponsor[];
+  broadcastSettings: BroadcastSettingsView;
 };
 
 const TABS = [
@@ -33,6 +36,7 @@ const TABS = [
   { id: "marca-torneo", label: "Marca del Torneo" },
   { id: "marca-transmision", label: "Marca de Transmisión" },
   { id: "importar", label: "Importar con IA" },
+  { id: "transmitir", label: "📡 Transmitir" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -68,6 +72,7 @@ export default function Board(data: BoardData) {
         {tab === "calendario" && <CalendarTab {...data} />}
         {tab === "posiciones" && <StandingsTab {...data} />}
         {tab === "importar" && <ImportTab {...data} onDone={() => setTab("calendario")} />}
+        {tab === "transmitir" && <TransmitTab {...data} />}
         {/* Los editores de marca siguen montados al cambiar de pestaña para no perder cambios sin guardar. */}
         {(["tournament", "broadcast"] as BrandKind[]).map((kind) => {
           const row = data.brands.find((b) => b.kind === kind);

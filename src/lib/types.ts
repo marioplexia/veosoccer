@@ -16,4 +16,6 @@ export type Fixture = {
   note: string | null;
 };
 export type Goal = { id: string; fixture_id: string; team_id: string; player_name: string; minute: number | null };
+export type Sponsor = { id: string; name: string; image_path: string | null };
+export type BroadcastSettingsView = { rtmp_url: string; key_hint: string | null; ad_every_minutes: number };
 export type BrandRow = { kind: "tournament" | "broadcast"; settings: unknown; logo_path: string | null };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRANDS } from "@/lib/brand";
-import { DEFAULT_MATCH, FORMATS, TEMPLATES, autoTeamColors, drawScene, initials, parseFormation, resolveTeamColors, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
+import { DEFAULT_MATCH, FORMATS, TEMPLATES, autoTeamColors, drawLiveOverlay, drawScene, initials, parseFormation, resolveTeamColors, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
 
 /** Contexto 2D falso: registra las llamadas de texto y acepta cualquier otra operación. */
 function fakeCtx() {
@@ -264,5 +264,26 @@ describe("marcadores de equipo", () => {
     expect(autoTeamColors("Leones").color).toMatch(/^#[0-9A-F]{6}$/);
     expect(resolveTeamColors("Leones", "#c8102e", "")).toEqual({ color: "#C8102E", color2: autoTeamColors("Leones").color2 });
     expect(resolveTeamColors("Leones", "rojo", "#12")).toEqual(autoTeamColors("Leones"));
+  });
+});
+
+describe("alineación y capas en vivo", () => {
+  it("la alineación lista dorsales y nombres", () => {
+    const f = fakeCtx();
+    drawScene(f.ctx, "lineup", input("broadcast", "horizontal", 5));
+    expect(f.texts).toEqual(expect.arrayContaining(["Leones · Alineación", "Portero Uno", "1", "9"]));
+  });
+  it("las capas en vivo dibujan marcador, gol, rótulo y patrocinador", () => {
+    const f = fakeCtx();
+    drawLiveOverlay(f.ctx, input("broadcast", "horizontal", 0), {
+      scoreboard: true, clock: "12:34", goal: { side: "home", t: 2 },
+      lower: { kind: "yellow", side: "away", t: 2, text: "Luis", minute: 12 }, sponsor: { index: 0, t: 3 },
+    });
+    expect(f.texts).toEqual(expect.arrayContaining(["12:34", "LEO", "AMARILLA · LUIS", "12'", "PATROCINADOR", "Tu patrocinador"]));
+  });
+  it("sin nada activo no dibuja texto", () => {
+    const f = fakeCtx();
+    drawLiveOverlay(f.ctx, input("broadcast", "vertical", 0), { scoreboard: false, clock: "00:00" });
+    expect(f.texts).toEqual([]);
   });
 });

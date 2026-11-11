@@ -21,6 +21,8 @@ export type MatchData = {
   /** Colores de los equipos ("" = automático según el nombre). */
   homeColor: string; homeColor2: string; awayColor: string; awayColor2: string;
   bugTeams: BugTeam[];
+  lineup: { team: string; players: { number: number | null; name: string }[] };
+  sponsors: { name: string; image?: string }[];
 };
 
 export type BugTeam = { name: string; color: string; color2: string; crest?: string };
@@ -67,10 +69,12 @@ export const DEFAULT_MATCH: MatchData = {
   homeColor: "", homeColor2: "", awayColor: "", awayColor2: "",
   bugTeams: [["Leones", "#C8102E", "#1D4ED8"], ["Tigres", "#F59E0B", "#111827"], ["Águilas", "#1D4ED8", "#FFFFFF"], ["Lobos", "#4B5563", "#F43F5E"], ["Búhos", "#7C2D12", "#FACC15"], ["Halcones", "#0F766E", "#A7F3D0"]]
     .map(([name, color, color2]) => ({ name, color, color2 })),
+  lineup: { team: "Leones", players: ["Portero Uno", "Lateral Dos", "Central Tres", "Central Cuatro", "Lateral Cinco", "Medio Seis", "Medio Ocho", "Medio Diez", "Extremo Siete", "Delantero Nueve", "Extremo Once"].map((name, k) => ({ number: [1, 2, 3, 4, 5, 6, 8, 10, 7, 9, 11][k], name })) },
+  sponsors: [{ name: "Tu patrocinador" }],
 };
 
-export type SceneId = "teamGoal" | "teamBugs" | "ident" | "matchday" | "matchup" | "totw" | "potw" | "results" | "standings" | "goal" | "halftime" | "fulltime" | "kickoff" | "yellow" | "red" | "substitution";
-export type FieldKey = "match" | "home" | "away" | "homeScore" | "awayScore" | "side" | "player" | "minute" | "playerOut" | "playerIn" | "round" | "subtitle" | "homeLogo" | "awayLogo" | "teamLogo" | "photo" | "teamTitle" | "awardTitle" | "label" | "formation" | "players" | "resultsPick" | "standingsPick" | "tableTitle" | "background" | "teamColors" | "bugTeamsPick";
+export type SceneId = "lineup" | "teamGoal" | "teamBugs" | "ident" | "matchday" | "matchup" | "totw" | "potw" | "results" | "standings" | "goal" | "halftime" | "fulltime" | "kickoff" | "yellow" | "red" | "substitution";
+export type FieldKey = "match" | "home" | "away" | "homeScore" | "awayScore" | "side" | "player" | "minute" | "playerOut" | "playerIn" | "round" | "subtitle" | "homeLogo" | "awayLogo" | "teamLogo" | "photo" | "teamTitle" | "awardTitle" | "label" | "formation" | "players" | "resultsPick" | "standingsPick" | "tableTitle" | "background" | "teamColors" | "bugTeamsPick" | "lineupPick";
 
 export type TemplateDef = { id: SceneId; kind: BrandKind; label: string; description: string; duration: number; fields: FieldKey[]; format?: FormatId; poster?: number };
 
@@ -80,6 +84,7 @@ export const TEMPLATES: TemplateDef[] = [
   { id: "matchup", kind: "tournament", label: "Presentación de partido", description: "Los dos escudos con tu logo al centro, el partido y la fecha.", duration: 5, fields: ["match", "home", "away", "homeLogo", "awayLogo", "subtitle"], poster: 3.5 },
   { id: "totw", kind: "tournament", label: "Equipo ideal", description: "Cancha con las tarjetas de los jugadores en su formación.", duration: 5, fields: ["teamTitle", "round", "formation", "players"], format: "portrait", poster: 4 },
   { id: "potw", kind: "tournament", label: "Jugador de la jornada", description: "Foto y nombre del jugador destacado.", duration: 5, fields: ["awardTitle", "label", "round", "player", "photo", "teamLogo"], format: "portrait", poster: 4 },
+  { id: "lineup", kind: "broadcast", label: "Alineación", description: "Plantilla del equipo con dorsales, con el mismo movimiento que la tabla.", duration: 10, fields: ["lineupPick", "background"], poster: 5 },
   { id: "teamGoal", kind: "broadcast", label: "Gol del equipo", description: "Marcador del equipo con sus colores y escudo: cae “GOL” letra por letra, corre el reloj y aparece el resultado.", duration: 6, fields: ["match", "home", "away", "homeScore", "awayScore", "side", "minute", "teamColors"], poster: 3 },
   { id: "teamBugs", kind: "broadcast", label: "Marcadores de equipos", description: "Columna con el marcador de cada equipo, animándose uno tras otro.", duration: 8, fields: ["bugTeamsPick", "minute"], format: "vertical", poster: 5 },
   { id: "results", kind: "broadcast", label: "Resultados de la jornada", description: "Lista de resultados con escudos; sale con barrido de color y deja ver tu foto de fondo.", duration: 10, fields: ["resultsPick", "tableTitle", "background"], poster: 5 },
@@ -1369,6 +1374,82 @@ function sceneTeamBugs(ctx: Ctx, i: SceneInput) {
   });
 }
 
+function sceneLineup(ctx: Ctx, i: SceneInput) {
+  const ps = i.data.lineup.players.slice(0, MAX_TABLE_ROWS);
+  const ink = inkOf(i);
+  tableScene(ctx, i, `${i.data.lineup.team} · Alineación`, ps.length, null, (k, x, y, rw, rh) => {
+    const p = ps[k];
+    const cy = y + rh / 2;
+    const px = Math.min(rh * 0.42, 38 * (Math.min(i.w, i.h) / 1080));
+    const nx = x + rw * 0.22;
+    ctx.save();
+    ctx.fillStyle = ink;
+    rr(ctx, nx - rh * 0.95, cy - rh * 0.34, rh * 0.68, rh * 0.68, rh * 0.14); ctx.fill();
+    ctx.restore();
+    text(ctx, p.number != null ? String(p.number) : "–", nx - rh * 0.61, cy, i.fonts.numbers, px, "#FFFFFF");
+    text(ctx, p.name, nx, cy, i.fonts.heading, px, ink, { align: "left", maxW: rw * 0.72 });
+  });
+}
+
+/* ───────────── capas sobre el video en vivo ───────────── */
+
+export type LiveOverlay = {
+  scoreboard: boolean;
+  clock: string;
+  goal?: { side: "home" | "away"; t: number };
+  lower?: { kind: "yellow" | "red" | "sub" | "scorer"; side: "home" | "away"; t: number; text: string; minute: number };
+  sponsor?: { index: number; t: number };
+};
+
+/** Dibuja marcador, barra de gol, rótulos y patrocinador encima del video (sin fondo). */
+export function drawLiveOverlay(ctx: Ctx, i: SceneInput, o: LiveOverlay) {
+  const { w, h, data } = i;
+  const u = Math.min(w, h) / 1080;
+  if (o.scoreboard) {
+    const sw = Math.min(w * 0.46, 760 * u);
+    scoreboard(ctx, i, { x: w * 0.03, y: h * 0.04, w: sw, h: Math.max(48 * u, sw / 13) }, { clock: o.clock });
+  }
+  if (o.goal) {
+    const home = o.goal.side === "home";
+    const name = home ? data.home : data.away;
+    const col = resolveTeamColors(name, home ? data.homeColor : data.awayColor, home ? data.homeColor2 : data.awayColor2);
+    const W = Math.min(w * 0.7, 1100 * u);
+    const out = easeInCubic(progress(o.goal.t, 5.4, 6));
+    ctx.save(); ctx.globalAlpha = 1 - out;
+    teamBug(ctx, i, w / 2, h * 0.7, W, { name, ...col, crest: home ? "homeLogo" : "awayLogo" }, o.goal.t, {
+      clock: o.clock, score: `${data.homeScore}-${data.awayScore}`, after: easeInOutCubic(progress(o.goal.t, 3.7, 4.2)),
+    });
+    ctx.restore();
+  }
+  if (o.lower) {
+    const L = o.lower;
+    const dur = L.kind === "scorer" ? 6 : 7;
+    const slide = progress(L.t, 0, 0.5) * (1 - progress(L.t, dur - 0.5, dur));
+    const label = L.kind === "yellow" ? "AMARILLA · " : L.kind === "red" ? "ROJA · " : L.kind === "sub" ? "CAMBIO · " : "GOL · ";
+    lowerThird(ctx, i, h * 0.78, slide, label + L.text, `${L.minute}'`);
+  }
+  if (o.sponsor && data.sponsors.length > 0) {
+    const sp = data.sponsors[o.sponsor.index % data.sponsors.length];
+    const t = o.sponsor.t;
+    const k = easeOutCubic(progress(t, 0, 0.5)) * (1 - easeInCubic(progress(t, 9.4, 10)));
+    const cw = Math.min(w * 0.36, 560 * u), ch = 120 * u;
+    const x = w - cw - w * 0.03 + (1 - k) * (cw + w * 0.05), y = h - ch - h * 0.05;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, k * 1.5);
+    ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = 24 * u;
+    ctx.fillStyle = "#FFFFFF"; rr(ctx, x, y, cw, ch, 16 * u); ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.fillStyle = i.colors.lowerAccent; rr(ctx, x, y, 12 * u, ch, 6 * u); ctx.fill();
+    const im = sp.image ? i.images?.[sp.image] : undefined;
+    const logoW = ch * 1.3;
+    if (im) contain(ctx, im, x + 24 * u + logoW / 2, y + ch / 2, logoW, ch * 0.75);
+    const tx = x + (im ? 40 * u + logoW : 34 * u);
+    text(ctx, "PATROCINADOR", tx, y + ch * 0.32, i.fonts.body, 22 * u, "#64748B", { align: "left" });
+    text(ctx, sp.name, tx, y + ch * 0.64, i.fonts.heading, 40 * u, "#0F172A", { align: "left", maxW: x + cw - tx - 20 * u });
+    ctx.restore();
+  }
+}
+
 export function drawScene(ctx: Ctx, id: SceneId, input: SceneInput) {
   ctx.save();
   ctx.clearRect(0, 0, input.w, input.h);
@@ -1378,6 +1459,7 @@ export function drawScene(ctx: Ctx, id: SceneId, input: SceneInput) {
     case "matchup": sceneMatchup(ctx, input); break;
     case "totw": sceneTotw(ctx, input); break;
     case "potw": scenePotw(ctx, input); break;
+    case "lineup": sceneLineup(ctx, input); break;
     case "teamGoal": sceneTeamGoal(ctx, input); break;
     case "teamBugs": sceneTeamBugs(ctx, input); break;
     case "results": sceneResults(ctx, input); break;
