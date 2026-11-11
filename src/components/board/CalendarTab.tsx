@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { dbError, formatKickoff, fromInputValue, toInputValue } from "@/lib/format";
@@ -125,6 +126,10 @@ export default function CalendarTab({ tournament, divisions, teams, venues, fixt
         </p>
       )}
 
+      <Link href={`/panel/torneos/${tournament.id}/partidos`} className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm font-semibold text-white" style={{ background: "linear-gradient(90deg,#9B19FF,#7B5CFF,#00B4FF)" }}>
+        <span>Ver la pantalla de partidos: abre uno para transmitirlo o generar su resumen con IA</span><span aria-hidden>→</span>
+      </Link>
+
       <AddFixture tournamentId={tournament.id} divisions={divisions} teams={teams} venues={venues} nextRound={nextRound} defaultDivision={filter === "all" ? divisions[0].id : filter} />
 
       {visible.length === 0 ? (
@@ -144,7 +149,7 @@ export default function CalendarTab({ tournament, divisions, teams, venues, fixt
                     {inRound.filter((f) => f.division_id === d.id).map((f) => (
                       <FixtureRow
                         key={`${f.id}-${f.kickoff}-${f.venue_id}-${f.home_score}-${f.away_score}-${f.note}`}
-                        fixture={f} teams={teams} venues={venues}
+                        tournamentId={tournament.id} fixture={f} teams={teams} venues={venues}
                         goals={goals.filter((g) => g.fixture_id === f.id)}
                         conflict={conflicts.has(f.id)}
                       />
@@ -229,7 +234,7 @@ function AddFixture({ tournamentId, divisions, teams, venues, nextRound, default
   );
 }
 
-function FixtureRow({ fixture, teams, venues, goals, conflict }: { fixture: Fixture; teams: Team[]; venues: Venue[]; goals: Goal[]; conflict: boolean }) {
+function FixtureRow({ tournamentId, fixture, teams, venues, goals, conflict }: { tournamentId: string; fixture: Fixture; teams: Team[]; venues: Venue[]; goals: Goal[]; conflict: boolean }) {
   const router = useRouter();
   const name = (id: string) => teams.find((t) => t.id === id)?.name ?? "?";
   const [venue, setVenue] = useState(fixture.venue_id ?? "");
@@ -272,7 +277,9 @@ function FixtureRow({ fixture, teams, venues, goals, conflict }: { fixture: Fixt
     <li className="py-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="min-w-[14rem] flex-1">
-          <p className="font-semibold text-slate-900">{name(fixture.home_team_id)} <span className="font-normal text-slate-400">vs</span> {name(fixture.away_team_id)}</p>
+          <Link href={`/panel/torneos/${tournamentId}/partidos/${fixture.id}`} className="font-semibold text-slate-900 hover:text-emerald-700 hover:underline" title="Ver el partido a pantalla completa">
+            {name(fixture.home_team_id)} <span className="font-normal text-slate-400">vs</span> {name(fixture.away_team_id)} <span aria-hidden className="text-slate-400">↗</span>
+          </Link>
           <p className="text-xs text-slate-500">
             {formatKickoff(fixture.kickoff)}{played ? " · Finalizado" : ""}
             {fixture.note ? <span className="ml-1 font-medium text-amber-700">· {fixture.note}</span> : null}

@@ -20,7 +20,7 @@ const TOP_LINKS = [
 ];
 
 const NAV = [
-  { href: "#partidos", label: "Partidos" },
+  { href: "/partidos", label: "Partidos" },
   { href: "#tabla", label: "Tabla" },
   { href: "#torneos", label: "Torneos" },
   { href: "#transmision", label: "Transmisión" },
@@ -158,7 +158,7 @@ export default function Home() {
         <div className="mx-auto flex h-[72px] max-w-[1440px] items-center gap-4 px-4">
           <Link href="/" aria-label="VeoSoccer, inicio"><Wordmark /></Link>
           <nav aria-label="Principal" className="ml-6 hidden items-center gap-8 text-[15px] font-semibold lg:flex">
-            {NAV.map((n) => <a key={n.href} href={n.href} className="hover:underline">{n.label}</a>)}
+            {NAV.map((n) => <Link key={n.href} href={n.href} className="hover:underline">{n.label}</Link>)}
           </nav>
           <div className="ml-auto flex items-center gap-3 text-sm font-medium">
             <Link href="/registro" className="rounded-full p-[1.5px]" style={{ background: "linear-gradient(90deg,#0BEDFE,#843EFF,#FF6E11)" }}>
@@ -216,7 +216,7 @@ export default function Home() {
           <section id="partidos" className="scroll-mt-24 rounded-2xl bg-white p-4 sm:p-5">
             <div className="mb-4 flex items-baseline justify-between gap-4">
               <h2 className="text-[22px] font-semibold tracking-tight">Partidos</h2>
-              <span className="text-xs opacity-60">Ejemplo · Jornada 6</span>
+              <Link href="/partidos" className="text-sm font-medium hover:underline">Ver todos los partidos →</Link>
             </div>
             <ul className="grid gap-3 sm:grid-cols-2">
               {MATCHES.map(([h, a, hs, as]) => (
