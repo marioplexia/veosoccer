@@ -5,6 +5,8 @@ import { useMemo, useState } from "react";
 import { dbError } from "@/lib/format";
 import { ACCEPTED_IMAGES, mediaUrl, prepareImage, removeMedia, uploadMedia } from "@/lib/media";
 import { autoTeamColors } from "@/lib/motion/scenes";
+import { CREST_STYLES, svgToPng } from "@/lib/crest";
+import { svgDataUrl } from "@/lib/svg-safe";
 import { createClient } from "@/lib/supabase/client";
 import type { Division, Player, Team } from "@/lib/types";
 import { btnDanger, btnGhost, btnPrimary, Card, Empty, ErrorMsg, inputCls } from "@/components/ui";
@@ -94,6 +96,7 @@ function TeamRow({ tournamentId, divisionName, team, players }: { tournamentId: 
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
   const [open, setOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const auto = autoTeamColors(team.name);
@@ -108,6 +111,13 @@ function TeamRow({ tournamentId, divisionName, team, players }: { tournamentId: 
     catch (e) { setError(e instanceof Error ? e.message : dbError(e as { message: string })); }
     finally { setBusy(false); }
   }
+
+  const saveCrestBlob = async (blob: Blob) => {
+    const path = await uploadMedia(supabase, tournamentId, `crest-${team.id}`, blob);
+    const { error } = await supabase.from("tournament_teams").update({ logo_path: path }).eq("id", team.id);
+    if (error) { await removeMedia(supabase, path); throw new Error(dbError(error)); }
+    await removeMedia(supabase, team.logo_path);
+  };
 
   const setCrest = (file: File) => run(async () => {
     const blob = await prepareImage(file, "crest");
@@ -150,10 +160,19 @@ function TeamRow({ tournamentId, divisionName, team, players }: { tournamentId: 
         </span>
         <FileButton text={team.logo_path ? "Cambiar escudo" : "Subir escudo"} onPick={setCrest} disabled={busy} />
         {team.logo_path && <button onClick={clearCrest} disabled={busy} className={btnDanger}>Quitar escudo</button>}
+        <button onClick={() => setAiOpen((o) => !o)} aria-expanded={aiOpen} className={btnGhost}>✨ Crear escudo con IA</button>
         <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className={btnGhost}>Plantilla ({players.length})</button>
         <button onClick={removeTeam} disabled={busy} className={btnDanger}>Eliminar</button>
       </div>
       <div className="mt-2"><ErrorMsg message={error} /></div>
+      {aiOpen && (
+        <AiCrest
+          tournamentId={tournamentId}
+          team={team}
+          busy={busy}
+          onUse={(svg) => run(async () => { await saveCrestBlob(await svgToPng(svgDataUrl(svg))); setAiOpen(false); })}
+        />
+      )}
       {open && <Roster tournamentId={tournamentId} team={team} players={players} />}
     </li>
   );
@@ -231,6 +250,71 @@ function Roster({ tournamentId, team, players }: { tournamentId: string; team: T
         </ul>
       )}
       <p className="mt-3 text-xs text-slate-500">Las fotos se reducen antes de subirlas. Se ven mejor recortadas a medio cuerpo, con la cara arriba.</p>
+    </div>
+  );
+}
+
+type Variant = { concept: string; svg: string };
+
+function AiCrest({ tournamentId, team, busy, onUse }: { tournamentId: string; team: Team; busy: boolean; onUse: (svg: string) => void }) {
+  const [style, setStyle] = useState("clasico");
+  const [idea, setIdea] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [variants, setVariants] = useState<Variant[]>([]);
+
+  async function generate() {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/torneos/${tournamentId}/escudo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teamId: team.id, style, idea }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? "No se pudo crear el escudo.");
+      setVariants(json.variants as Variant[]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo crear el escudo.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-xl bg-violet-50 p-4">
+      <p className="mb-3 text-sm text-slate-700">
+        La IA dibuja 3 propuestas originales para <strong>{team.name}</strong> con sus colores. Eliges una y se guarda como escudo del equipo.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col text-sm font-medium text-slate-700">Estilo
+          <select className={`${inputCls} mt-1 w-48!`} value={style} onChange={(e) => setStyle(e.target.value)}>
+            {Object.entries(CREST_STYLES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </label>
+        <label className="min-w-[14rem] flex-1 text-sm font-medium text-slate-700">Idea (opcional)
+          <input className={`${inputCls} mt-1`} value={idea} onChange={(e) => setIdea(e.target.value)} maxLength={200} placeholder="Ej. un león con corona, estrellas arriba" />
+        </label>
+        <button onClick={generate} disabled={loading || busy} className={btnPrimary}>
+          {loading ? "Dibujando… (hasta 1 min)" : variants.length ? "Generar otras" : "Generar propuestas"}
+        </button>
+      </div>
+      <div className="mt-2"><ErrorMsg message={error} /></div>
+      {variants.length > 0 && (
+        <ul className="mt-4 grid gap-3 sm:grid-cols-3">
+          {variants.map((v, k) => (
+            <li key={k} className="flex flex-col items-center gap-2 rounded-xl bg-white p-3 ring-1 ring-slate-200">
+              {/* El SVG ya fue validado en el servidor; además, dentro de <img> no puede ejecutar nada. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={svgDataUrl(v.svg)} alt={`Propuesta ${k + 1}: ${v.concept}`} className="h-36 w-36 object-contain" />
+              <p className="text-center text-xs text-slate-500">{v.concept}</p>
+              <button onClick={() => onUse(v.svg)} disabled={busy} className={btnPrimary}>{busy ? "Guardando…" : "Usar este"}</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-3 text-xs text-slate-500">Cada generación usa la IA y cuenta para el límite diario. Revisa que el diseño no se parezca a una marca existente antes de usarlo públicamente.</p>
     </div>
   );
 }
