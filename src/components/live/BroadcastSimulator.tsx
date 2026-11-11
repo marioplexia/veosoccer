@@ -30,7 +30,7 @@ const DEMO_PLAYERS: Player[] = DEFAULT_MATCH.lineup.players.flatMap((pl, k) => [
 
 export default function BroadcastSimulator(p: {
   tournamentName: string; brand: BrandSettings; brandLogoPath: string | null;
-  teams: Team[]; fixtures: Fixture[]; players: Player[]; sponsors: Sponsor[]; adEveryMinutes: number;
+  teams: Team[]; fixtures: Fixture[]; players: Player[]; sponsors: Sponsor[]; adEveryMinutes: number; palette?: string[];
 }) {
   const supabase = useMemo(() => createClient(), []);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -74,7 +74,7 @@ export default function BroadcastSimulator(p: {
     const input: SceneInput = {
       w: W, h: H, t: 0, kind: "broadcast", colors: p.brand.colors, fonts: p.brand.fonts,
       logo: L.logo?.img ?? null, logoSize: L.logo ? { w: L.logo.w, h: L.logo.h } : null,
-      tournamentName: p.tournamentName, data, images: L.images,
+      tournamentName: p.tournamentName, data, images: L.images, palette: p.palette,
     };
     renderBroadcastFrame(ctx, shot, input, L.lineups, (c) => drawStadium(c, input, time));
   };
@@ -96,7 +96,7 @@ export default function BroadcastSimulator(p: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, recording]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (!playing) render(t); }, [t, playing, images, logo, fixtureId, p.brand]);
+  useEffect(() => { if (!playing) render(t); }, [t, playing, images, logo, fixtureId, p.brand, p.palette]);
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 

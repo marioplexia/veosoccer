@@ -114,6 +114,8 @@ export type SceneInput = {
   logo: CanvasImageSource | null;
   logoSize: { w: number; h: number } | null;
   images?: Record<string, SceneImage>;
+  /** Paleta de identidad (Marca del Torneo). Si existe, los paneles de color animados la usan. */
+  palette?: string[];
   tournamentName: string;
   data: MatchData;
 };
@@ -271,6 +273,12 @@ export function washPalette(kind: BrandKind, c: Record<string, string>): string[
     : [c.homeStripe, c.awayStripe, c.clockBg, c.lowerAccent];
 }
 
+/** Colores de los paneles animados: la paleta de identidad si se indicó; si no, la de la marca de la pieza. */
+export function paletteOf(i: Pick<SceneInput, "kind" | "colors" | "palette">): string[] {
+  const p = (i.palette ?? []).filter((c) => /^#[0-9A-Fa-f]{6}$/.test(c));
+  return p.length >= 2 ? p : washPalette(i.kind, i.colors);
+}
+
 function mix(a: string, b: string, k: number): string {
   const [r1, g1, b1] = hexToRgb(a);
   const [r2, g2, b2] = hexToRgb(b);
@@ -285,20 +293,32 @@ export function vividMid(a: string, b: string): string {
   if (dh < -180) dh += 360;
   return hsvToHex({ h: x.h + dh / 2, s: (x.s + y.s) / 2, v: Math.max(x.v, y.v) });
 }
-/** Mezcla recorriendo el matiz, para que el paso entre dos colores vivos no se apague. */
-export function vividMix(a: string, b: string, k: number): string {
+const hueDist = (a: number, b: number) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+
+/**
+ * Transición entre dos colores de la marca sin inventar tonos ajenos:
+ * - Si son cercanos (y el recorrido pasa cerca de la paleta), recorre el matiz entre ellos.
+ * - Si son lejanos, pasa por un tono casi blanco ("un color, blanco, y luego el otro"),
+ *   así nunca aparece, por ejemplo, un naranja que no está en tu marca.
+ */
+export function vividMix(a: string, b: string, k: number, pal?: string[]): string {
   const x = hexToHsv(a), y = hexToHsv(b);
   if (x.s < 0.15 || y.s < 0.15) return mix(a, b, k);
   let dh = y.h - x.h;
   if (dh > 180) dh -= 360;
   if (dh < -180) dh += 360;
-  return hsvToHex({ h: x.h + dh * k, s: lerp(x.s, y.s, k), v: lerp(x.v, y.v, k) });
+  const hues = (pal ?? [a, b]).map(hexToHsv).filter((c) => c.s >= 0.15).map((c) => c.h);
+  const near = (h: number) => Math.min(...hues.map((q) => hueDist(((h % 360) + 360) % 360, q)));
+  const closeEnough = Math.abs(dh) <= 100 && [0.25, 0.5, 0.75].every((f) => near(x.h + dh * f) <= 45);
+  if (closeEnough) return hsvToHex({ h: x.h + dh * k, s: lerp(x.s, y.s, k), v: lerp(x.v, y.v, k) });
+  // Destello blanco angosto en el centro: los extremos conservan su color pleno.
+  return mix(mix(a, b, k), "#FFFFFF", 0.7 * Math.pow(Math.sin(Math.PI * clamp01(k)), 4));
 }
-function samplePalette(pal: string[], x: number): string {
+export function samplePalette(pal: string[], x: number): string {
   const n = pal.length;
   const k = ((x % n) + n) % n;
   const i0 = Math.floor(k);
-  return vividMix(pal[i0], pal[(i0 + 1) % n], k - i0);
+  return vividMix(pal[i0], pal[(i0 + 1) % n], k - i0, pal);
 }
 
 /** Color de tinta: oscuro de la marca (o casi negro si no contrasta con blanco). */
@@ -368,7 +388,7 @@ function drawStage(ctx: Ctx, i: SceneInput, cfg: StageCfg) {
   shards(ctx, w, h, t, ink, 0.02);
 
   if (st.reveal > 0.001) {
-    const pal = washPalette(i.kind, i.colors);
+    const pal = paletteOf(i);
     const pw = w * 0.5;
     const r = Math.min(w, h) * 0.09;
     ctx.save();
@@ -391,7 +411,7 @@ function drawStage(ctx: Ctx, i: SceneInput, cfg: StageCfg) {
       const g = ctx.createLinearGradient(0, 0, pw, h);
       const ca = samplePalette(pal, k + st.drift), cb = samplePalette(pal, k + 1 + st.drift);
       g.addColorStop(0, ca);
-      g.addColorStop(0.5, vividMid(ca, cb));
+      g.addColorStop(0.5, vividMix(ca, cb, 0.5, pal));
       g.addColorStop(1, cb);
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, pw, h);
@@ -655,11 +675,11 @@ export function initials(name: string): string {
 const appear = (t: number, k: number) => easeOutCubic(progress(t, 0.15 + k * 0.12, 0.65 + k * 0.12));
 
 function brandGradient(ctx: Ctx, i: SceneInput, x0: number, y0: number, x1: number, y1: number) {
-  const pal = washPalette(i.kind, i.colors);
+  const pal = paletteOf(i);
   const ph = 0.12 * Math.sin(i.t * 0.9) + 0.12; // vaivén suave alrededor del primer par de colores
   const a = samplePalette(pal, ph), b = samplePalette(pal, ph + 1);
   const g = ctx.createLinearGradient(x0, y0, x1, y1);
-  g.addColorStop(0, a); g.addColorStop(0.5, vividMid(a, b)); g.addColorStop(1, b);
+  g.addColorStop(0, a); g.addColorStop(0.5, vividMix(a, b, 0.5, pal)); g.addColorStop(1, b);
   return g;
 }
 
@@ -1049,7 +1069,7 @@ function tableScene(ctx: Ctx, i: SceneInput, title: string, n: number, header: (
   }
 
   // panel de color: entra, se mantiene; en la salida se expande hasta cubrir y se retira
-  const pal = washPalette("tournament", i.kind === "tournament" ? i.colors : { ...i.colors, primary: i.colors.homeStripe, secondary: i.colors.awayStripe, accent: i.colors.clockBg, highlight: i.colors.lowerAccent, extra: i.colors.scoreBg });
+  const pal = paletteOf(i);
   const inK = easeOutCubic(progress(t, 0, T.panelIn));
   const expand = easeInOutCubic(progress(t, T.expandAt, T.revealAt));
   const leave = easeInOutCubic(progress(t, T.revealAt, T.D - 0.15));
@@ -1089,7 +1109,7 @@ function tableScene(ctx: Ctx, i: SceneInput, title: string, n: number, header: (
     const ph0 = t * 0.1;
     const g = L.horizontal ? ctx.createLinearGradient(0, 0, Math.max(L.panel.w, pw) * 0.6, h) : ctx.createLinearGradient(0, 0, w, Math.max(L.panel.h, ph));
     const ca = samplePalette(pal, ph0), cb = samplePalette(pal, ph0 + 1);
-    g.addColorStop(0, ca); g.addColorStop(0.5, vividMid(ca, cb)); g.addColorStop(1, cb);
+    g.addColorStop(0, ca); g.addColorStop(0.5, vividMix(ca, cb, 0.5, pal)); g.addColorStop(1, cb);
     ctx.fillStyle = g; ctx.fillRect(px, py, pw, ph);
     shards(ctx, w, h, t * 1.4, cb, 0.25);
     ctx.restore();

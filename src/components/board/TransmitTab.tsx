@@ -9,9 +9,9 @@ import { createClient } from "@/lib/supabase/client";
 import { btnDanger, btnGhost, btnPrimary, Card, Empty, ErrorMsg, inputCls } from "@/components/ui";
 import type { BoardData } from "./Board";
 import BroadcastSimulator from "@/components/live/BroadcastSimulator";
-import { sanitizeBrand } from "@/lib/brand";
+import type { BrandKind, BrandSettings } from "@/lib/brand";
 
-export default function TransmitTab({ tournament, divisions, teams, fixtures, players, sponsors, broadcastSettings, brands }: BoardData) {
+export default function TransmitTab({ tournament, divisions, teams, fixtures, players, sponsors, broadcastSettings, brands, liveBrands, palette }: BoardData & { liveBrands: Record<BrandKind, BrandSettings>; palette: string[] }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
   const [server, setServer] = useState(broadcastSettings.rtmp_url);
@@ -94,8 +94,9 @@ export default function TransmitTab({ tournament, divisions, teams, fixtures, pl
       <Card title="Simulador de la transmisión">
         <BroadcastSimulator
           tournamentName={tournament.name}
-          brand={sanitizeBrand("broadcast", brands.find((b) => b.kind === "broadcast")?.settings)}
-          brandLogoPath={brands.find((b) => b.kind === "broadcast")?.logo_path ?? null}
+          brand={liveBrands.broadcast}
+          palette={palette}
+          brandLogoPath={brands.find((b) => b.kind === "broadcast")?.logo_path ?? brands.find((b) => b.kind === "tournament")?.logo_path ?? null}
           teams={teams} fixtures={fixtures} players={players} sponsors={sponsors} adEveryMinutes={broadcastSettings.ad_every_minutes}
         />
       </Card>

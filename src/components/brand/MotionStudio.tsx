@@ -46,8 +46,8 @@ function ImageButton({ text, has, onPick, onClear }: { text: string; has: boolea
 }
 
 export default function MotionStudio({
-  kind, settings, logoUrl, tournamentName, matches, teams = [], players = [], fixtures = [], divisions = [],
-}: { kind: BrandKind; settings: BrandSettings; logoUrl: string | null; tournamentName: string; matches: MatchOption[]; teams?: Team[]; players?: Player[]; fixtures?: Fixture[]; divisions?: Division[] }) {
+  kind, settings, logoUrl, tournamentName, matches, teams = [], players = [], fixtures = [], divisions = [], palette,
+}: { kind: BrandKind; settings: BrandSettings; logoUrl: string | null; tournamentName: string; matches: MatchOption[]; teams?: Team[]; players?: Player[]; fixtures?: Fixture[]; divisions?: Division[]; palette?: string[] }) {
   const templates = useMemo(() => TEMPLATES.filter((t) => t.kind === kind), [kind]);
   const [id, setId] = useState<SceneId>(templates[0].id);
   const [format, setFormat] = useState<FormatId>("horizontal");
@@ -190,8 +190,8 @@ export default function MotionStudio({
   }, [logoUrl]);
 
   // Referencia a los últimos valores, para que el bucle de animación no use datos viejos.
-  const live = useRef({ id, w, h, kind, settings, logo, tournamentName, data, images });
-  live.current = { id, w, h, kind, settings, logo, tournamentName, data, images };
+  const live = useRef({ id, w, h, kind, settings, logo, tournamentName, data, images, palette });
+  live.current = { id, w, h, kind, settings, logo, tournamentName, data, images, palette };
 
   const render = useCallback((time: number) => {
     const canvas = canvasRef.current;
@@ -201,7 +201,7 @@ export default function MotionStudio({
     drawScene(ctx, L.id, {
       w: L.w, h: L.h, t: time, kind: L.kind, colors: L.settings.colors, fonts: L.settings.fonts,
       logo: L.logo?.img ?? null, logoSize: L.logo ? { w: L.logo.w, h: L.logo.h } : null,
-      tournamentName: L.tournamentName, data: L.data, images: L.images,
+      tournamentName: L.tournamentName, data: L.data, images: L.images, palette: L.palette,
     });
   }, []);
 

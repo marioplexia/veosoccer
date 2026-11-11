@@ -37,6 +37,7 @@ type Props = {
   sponsors: Sponsor[];
   adEveryMinutes: number;
   hasStreamKey: boolean;
+  palette?: string[];
 };
 
 export default function LiveStudio(p: Props) {
@@ -136,7 +137,7 @@ export default function LiveStudio(p: Props) {
         const input: SceneInput = {
           w: W, h: H, t: 0, kind: "broadcast", colors: p.brand.colors, fonts: p.brand.fonts,
           logo: L.logo?.img ?? null, logoSize: L.logo ? { w: L.logo.w, h: L.logo.h } : null,
-          tournamentName: p.tournament.name, data: L.matchData, images: L.images,
+          tournamentName: p.tournament.name, data: L.matchData, images: L.images, palette: p.palette,
         };
         renderBroadcastFrame(ctx, shot, input, L.lineups, (c2) => {
           c2.fillStyle = "#0B0F19"; c2.fillRect(0, 0, W, H);
@@ -152,7 +153,7 @@ export default function LiveStudio(p: Props) {
     raf = requestAnimationFrame(draw);
     const tick = setInterval(() => setNow(Date.now()), 500);
     return () => { cancelAnimationFrame(raf); clearInterval(tick); };
-  }, [p.brand, p.tournament.name, fontsReady]);
+  }, [p.brand, p.palette, p.tournament.name, fontsReady]);
 
   /* ───── salir al aire ───── */
   async function goLive() {

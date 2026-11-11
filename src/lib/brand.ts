@@ -151,6 +151,29 @@ export function brandToCssVars(kind: BrandKind, b: BrandSettings): string {
   return `:root {\n${lines.join("\n")}\n}`;
 }
 
+/** Los 5 colores de identidad de la Marca del Torneo, en orden. */
+export function identityPalette(t: BrandSettings): string[] {
+  return ["primary", "secondary", "accent", "highlight", "extra"].map((k) => t.colors[k]).filter(Boolean);
+}
+
+/**
+ * Marca de transmisión inicial a partir de la del torneo (para quien aún no la ha guardado):
+ * mismos colores de identidad y tipografías, en lugar de los colores de fábrica.
+ */
+export function broadcastFromTournament(t: BrandSettings): BrandSettings {
+  const c = t.colors;
+  const dark = c.text ?? DEFAULT_BRANDS.broadcast.colors.scoreBg;
+  return {
+    colors: {
+      ...DEFAULT_BRANDS.broadcast.colors,
+      homeStripe: c.extra ?? c.highlight, awayStripe: c.primary, scoreBg: dark, clockBg: c.primary,
+      lowerBg: dark, lowerAccent: c.highlight ?? c.accent,
+    },
+    palette: [],
+    fonts: { ...t.fonts },
+  };
+}
+
 export const BRAND_LABEL: Record<BrandKind, string> = {
   tournament: "Marca del Torneo",
   broadcast: "Marca de Transmisión",

@@ -28,13 +28,16 @@ type Props = {
   players?: Player[];
   fixtures?: Fixture[];
   divisions?: Division[];
+  palette?: string[];
+  onSettingsChange?: (s: BrandSettings) => void;
 };
 
-export default function BrandEditor({ tournamentId, tournamentName, kind, initial, initialLogoPath, teamNames, matches, teams = [], players = [], fixtures = [], divisions = [] }: Props) {
+export default function BrandEditor({ tournamentId, tournamentName, kind, initial, initialLogoPath, teamNames, matches, teams = [], players = [], fixtures = [], divisions = [], palette, onSettingsChange }: Props) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
   const [settings, setSettings] = useState<BrandSettings>(initial);
+  useEffect(() => { onSettingsChange?.(settings); }, [settings, onSettingsChange]);
   const [saved, setSaved] = useState({ settings: JSON.stringify(initial), logoPath: initialLogoPath });
   const [logoPath, setLogoPath] = useState<string | null>(initialLogoPath);
   const [pending, setPending] = useState<{ file: File; url: string } | null>(null);
@@ -221,7 +224,7 @@ export default function BrandEditor({ tournamentId, tournamentName, kind, initia
         </div>
       </div>
     </div>
-    <MotionStudio kind={kind} settings={settings} logoUrl={logoUrl} tournamentName={tournamentName} matches={matches} teams={teams} players={players} fixtures={fixtures} divisions={divisions} />
+    <MotionStudio kind={kind} settings={settings} logoUrl={logoUrl} tournamentName={tournamentName} matches={matches} teams={teams} players={players} fixtures={fixtures} divisions={divisions} palette={palette} />
     </div>
   );
 }

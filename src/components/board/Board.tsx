@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { sanitizeBrand, type BrandKind } from "@/lib/brand";
+import { broadcastFromTournament, identityPalette, sanitizeBrand, type BrandKind, type BrandSettings } from "@/lib/brand";
 import type { BrandRow, BroadcastSettingsView, Division, Fixture, Goal, Player, Sponsor, Team, Tournament, Venue } from "@/lib/types";
 import TransmitTab from "./TransmitTab";
 import BrandEditor from "@/components/brand/BrandEditor";
@@ -43,6 +43,14 @@ type TabId = (typeof TABS)[number]["id"];
 
 export default function Board(data: BoardData) {
   const [tab, setTab] = useState<TabId>("resumen");
+  // Versión "en edición" de ambas marcas: lo que se cambia se ve al instante en estudio y simulador.
+  const [liveBrands, setLiveBrands] = useState<Record<BrandKind, BrandSettings>>(() => {
+    const tRow = data.brands.find((b) => b.kind === "tournament");
+    const bRow = data.brands.find((b) => b.kind === "broadcast");
+    const tournament = sanitizeBrand("tournament", tRow?.settings);
+    return { tournament, broadcast: bRow ? sanitizeBrand("broadcast", bRow.settings) : sanitizeBrand("broadcast", broadcastFromTournament(tournament)) };
+  });
+  const palette = identityPalette(liveBrands.tournament);
 
   return (
     <div className="mt-6">
@@ -72,7 +80,7 @@ export default function Board(data: BoardData) {
         {tab === "calendario" && <CalendarTab {...data} />}
         {tab === "posiciones" && <StandingsTab {...data} />}
         {tab === "importar" && <ImportTab {...data} onDone={() => setTab("calendario")} />}
-        {tab === "transmitir" && <TransmitTab {...data} />}
+        {tab === "transmitir" && <TransmitTab {...data} liveBrands={liveBrands} palette={palette} />}
         {/* Los editores de marca siguen montados al cambiar de pestaña para no perder cambios sin guardar. */}
         {(["tournament", "broadcast"] as BrandKind[]).map((kind) => {
           const row = data.brands.find((b) => b.kind === kind);
@@ -82,7 +90,9 @@ export default function Board(data: BoardData) {
                 tournamentId={data.tournament.id}
                 tournamentName={data.tournament.name}
                 kind={kind}
-                initial={sanitizeBrand(kind, row?.settings)}
+                initial={liveBrands[kind]}
+                palette={palette}
+                onSettingsChange={(s) => setLiveBrands((m) => (m[kind] === s ? m : { ...m, [kind]: s }))}
                 initialLogoPath={row?.logo_path ?? null}
                 teamNames={data.teams.map((t) => t.name)}
                 teams={data.teams}

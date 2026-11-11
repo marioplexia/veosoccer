@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRANDS } from "@/lib/brand";
-import { DEFAULT_MATCH, FORMATS, TEMPLATES, autoTeamColors, drawLiveOverlay, drawScene, initials, parseFormation, resolveTeamColors, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
+import { DEFAULT_MATCH, FORMATS, TEMPLATES, autoTeamColors, drawLiveOverlay, paletteOf, samplePalette, drawScene, initials, parseFormation, resolveTeamColors, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
 
 /** Contexto 2D falso: registra las llamadas de texto y acepta cualquier otra operación. */
 function fakeCtx() {
@@ -172,11 +172,17 @@ describe("carteles", () => {
 });
 
 describe("vividMix", () => {
-  it("respeta los extremos y no se apaga a mitad de camino", () => {
+  const rgb = (h: string) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16));
+  it("respeta los extremos", () => {
     expect(vividMix("#EBFF00", "#963CFF", 0)).toBe("#EBFF00");
     expect(vividMix("#EBFF00", "#963CFF", 1)).toBe("#963CFF");
-    const mid = vividMix("#EBFF00", "#963CFF", 0.5);
-    const [r, g, b] = [1, 3, 5].map((k) => parseInt(mid.slice(k, k + 2), 16));
+  });
+  it("colores lejanos pasan por un tono casi blanco a mitad de camino", () => {
+    const [r, g, b] = rgb(vividMix("#EBFF00", "#963CFF", 0.5));
+    expect(Math.min(r, g, b)).toBeGreaterThan(200);
+  });
+  it("colores cercanos se mantienen vivos", () => {
+    const [r, g, b] = rgb(vividMix("#EBFF00", "#00FF87", 0.5));
     expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeGreaterThan(150);
   });
 });
@@ -285,5 +291,37 @@ describe("alineación y capas en vivo", () => {
     const f = fakeCtx();
     drawLiveOverlay(f.ctx, input("broadcast", "vertical", 0), { scoreboard: false, clock: "00:00" });
     expect(f.texts).toEqual([]);
+  });
+});
+
+describe("paletteOf", () => {
+  it("prefiere la paleta de identidad y descarta valores inválidos", () => {
+    const colors = DEFAULT_BRANDS.broadcast.colors;
+    expect(paletteOf({ kind: "broadcast", colors, palette: ["#FF2882", "#008CFF", "rojo"] })).toEqual(["#FF2882", "#008CFF"]);
+    expect(paletteOf({ kind: "broadcast", colors, palette: [] })).toEqual(washPalette("broadcast", colors));
+    expect(paletteOf({ kind: "broadcast", colors })).toEqual(washPalette("broadcast", colors));
+  });
+});
+
+describe("degradados sin tonos ajenos a la paleta", () => {
+  const hue = (hex: string) => { const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; if (d < 0.15) return null;
+    let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 60; return h < 0 ? h + 360 : h; };
+  const orangeIn = (pal: string[]) => {
+    for (let x = 0; x < pal.length; x += 0.02) { const h = hue(samplePalette(pal, x)); if (h !== null && h >= 18 && h <= 45) return samplePalette(pal, x); }
+    return null;
+  };
+  it("con la paleta real del usuario nunca aparece naranja", () => {
+    expect(orangeIn(["#FF2882", "#008CFF", "#EBFF00", "#00FF87", "#05F0FF"])).toBeNull();
+  });
+  it("violeta → amarillo no pasa por naranja si la paleta no lo tiene", () => {
+    expect(orangeIn(["#7C3AED", "#7C3AED", "#EBFF00", "#00FF87", "#05F0FF"])).toBeNull();
+  });
+  it("si la paleta sí tiene naranja, puede usarlo", () => {
+    expect(orangeIn(["#FF2882", "#FF6900", "#EBFF00"])).not.toBeNull();
+  });
+  it("los extremos se respetan", () => {
+    expect(vividMix("#FF2882", "#008CFF", 0, ["#FF2882", "#008CFF"])).toBe("#FF2882");
+    expect(vividMix("#FF2882", "#008CFF", 1, ["#FF2882", "#008CFF"])).toBe("#008CFF");
   });
 });

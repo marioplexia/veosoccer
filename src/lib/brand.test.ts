@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_BRANDS, ROLES, brandToCssVars, sanitizeBrand } from "./brand";
+import { DEFAULT_BRANDS, ROLES, brandToCssVars, broadcastFromTournament, identityPalette, sanitizeBrand } from "./brand";
 import { FONTS, googleFontsUrl, nearestWeight } from "./fonts";
 
 describe("sanitizeBrand", () => {
@@ -109,5 +109,21 @@ describe("brandToCssVars", () => {
     expect(css).toContain("--brand-color-verde-nandu-2: #111111;");
     expect(css).toContain('--brand-font-numbers: "Barlow Condensed", sans-serif;');
     expect(css).toContain("--brand-weight-heading: 800;");
+  });
+});
+
+describe("marca de transmisión derivada del torneo", () => {
+  const t = sanitizeBrand("tournament", { colors: { primary: "#FF2882", secondary: "#008CFF", accent: "#EBFF00", highlight: "#00FF87", extra: "#05F0FF", text: "#38003C" } });
+  it("usa los colores de identidad y no los de fábrica", () => {
+    const b = sanitizeBrand("broadcast", broadcastFromTournament(t));
+    expect(b.colors.awayStripe).toBe("#FF2882");
+    expect(b.colors.homeStripe).toBe("#05F0FF");
+    expect(b.colors.clockBg).toBe("#FF2882");
+    expect(b.colors.scoreBg).toBe("#38003C");
+    expect(Object.values(b.colors)).not.toContain("#F59E0B");
+    expect(b.fonts).toEqual(t.fonts);
+  });
+  it("la paleta de identidad son los 5 colores de marca en orden", () => {
+    expect(identityPalette(t)).toEqual(["#FF2882", "#008CFF", "#EBFF00", "#00FF87", "#05F0FF"]);
   });
 });
