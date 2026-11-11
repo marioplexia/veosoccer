@@ -1382,7 +1382,13 @@ function tableLayout(i: SceneInput) {
     : { horizontal, u, panel: { x: 0, y: 0, w, h: h * 0.14 }, list: { x: w * 0.06, y: h * 0.19, w: w * 0.88, h: h * 0.68 }, strip: { x: 0, y: h * 0.89, w, h: h * 0.11 }, logo: { x: w / 2, y: h * 0.14, s: Math.min(w * 0.3, h * 0.13) } };
 }
 
-function tableScene(ctx: Ctx, i: SceneInput, title: string, n: number, header: ((x: number, y: number, rh: number) => void) | null, drawRow: (k: number, x: number, y: number, rw: number, rh: number) => void) {
+function tableScene(ctx: Ctx, i: SceneInput, title: string, n: number, header: ((x: number, y: number, rh: number) => void) | null, drawRow: (k: number, x: number, y: number, rw: number, rh: number) => void, fixedColors = false) {
+  // Colores fijos (resultados de la jornada): panel azul→morado y franja verde→azul agua, de la secuencia de referencia.
+  const stripGrad = (x0: number, y0: number, x1: number, y1: number, from: number, to: number) => {
+    const g = ctx.createLinearGradient(x0, y0, x1, y1);
+    for (let k = 0; k <= 6; k++) g.addColorStop(k / 6, stripColor(lerp(from, to, k / 6)));
+    return g;
+  };
   const { w, h, t } = i;
   const T = TABLE_T;
   const L = tableLayout(i);
@@ -1400,7 +1406,7 @@ function tableScene(ctx: Ctx, i: SceneInput, title: string, n: number, header: (
   rr(ctx, L.strip.x, L.strip.y, L.strip.w, L.strip.h, L.horizontal ? 0 : 0);
   ctx.clip();
   if (bg) cover(ctx, bg, L.strip.x, L.strip.y, L.strip.w, L.strip.h);
-  else { ctx.fillStyle = brandGradient(ctx, i, L.strip.x, L.strip.y, L.strip.x + L.strip.w, L.strip.y + L.strip.h); ctx.fillRect(L.strip.x, L.strip.y, L.strip.w, L.strip.h); shards(ctx, w, h, t * 1.3, "#FFFFFF", 0.14); }
+  else { ctx.fillStyle = fixedColors ? stripGrad(L.strip.x, L.strip.y, L.strip.x + L.strip.w * 0.6, L.strip.y + L.strip.h, 0.4, 2.6) : brandGradient(ctx, i, L.strip.x, L.strip.y, L.strip.x + L.strip.w, L.strip.y + L.strip.h); ctx.fillRect(L.strip.x, L.strip.y, L.strip.w, L.strip.h); shards(ctx, w, h, t * 1.3, "#FFFFFF", 0.14); }
   ctx.restore();
 
   // encabezado
@@ -1441,7 +1447,7 @@ function tableScene(ctx: Ctx, i: SceneInput, title: string, n: number, header: (
     const glow = Math.sin(Math.PI * sp);
     if (glow > 0.01) {
       ctx.save(); ctx.globalAlpha = inP * 0.16 * glow;
-      ctx.fillStyle = brandGradient(ctx, i, L.list.x, 0, L.list.x + L.list.w, 0);
+      ctx.fillStyle = fixedColors ? stripGrad(L.list.x, 0, L.list.x + L.list.w, 0, 3, 5) : brandGradient(ctx, i, L.list.x, 0, L.list.x + L.list.w, 0);
       rr(ctx, L.list.x - 10 * u, y + rh * 0.08, L.list.w + 20 * u, rh * 0.84, 12 * u); ctx.fill();
       ctx.restore();
     }
@@ -1493,8 +1499,12 @@ function tableScene(ctx: Ctx, i: SceneInput, title: string, n: number, header: (
     const g = L.horizontal ? ctx.createLinearGradient(0, 0, Math.max(L.panel.w, pw) * 0.6, h) : ctx.createLinearGradient(0, 0, w, Math.max(L.panel.h, ph));
     const ca = samplePalette(pal, ph0), cb = samplePalette(pal, ph0 + 1);
     g.addColorStop(0, ca); g.addColorStop(0.5, vividMix(ca, cb, 0.5, pal)); g.addColorStop(1, cb);
-    ctx.fillStyle = g; ctx.fillRect(px, py, pw, ph);
-    shards(ctx, w, h, t * 1.4, cb, 0.25);
+    const drift = 0.25 * Math.sin(t * 0.6);
+    ctx.fillStyle = fixedColors
+      ? (L.horizontal ? stripGrad(0, 0, Math.max(L.panel.w, pw) * 0.6, h, 3.1 + drift, 5) : stripGrad(0, 0, w, Math.max(L.panel.h, ph), 3.1 + drift, 5))
+      : g;
+    ctx.fillRect(px, py, pw, ph);
+    shards(ctx, w, h, t * 1.4, fixedColors ? "#FFFFFF" : cb, fixedColors ? 0.14 : 0.25);
     ctx.restore();
   }
 
@@ -1527,7 +1537,7 @@ function sceneResults(ctx: Ctx, i: SceneInput) {
     text(ctx, score, mid, cy, i.fonts.numbers, px * 1.05, ink, { maxW: scoreW * 0.9 });
     crest(ctx, i, r.awayCrest, r.away, mid + scoreW / 2 + cs / 2 + rh * 0.12, cy, cs);
     text(ctx, r.away, mid + scoreW / 2 + cs + rh * 0.3, cy, i.fonts.heading, px, ink, { align: "left", maxW: rw / 2 - scoreW / 2 - cs - rh * 0.4 });
-  });
+  }, true);
 }
 
 function sceneStandings(ctx: Ctx, i: SceneInput) {
