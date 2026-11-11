@@ -7,7 +7,7 @@ import type { Fixture, Player, Sponsor, Team } from "@/lib/types";
 
 export function buildBroadcastData(a: {
   fixture: Fixture; teams: Team[]; divisionFixtures: Fixture[]; sponsors: Sponsor[];
-  score: { home: number; away: number }; started: boolean;
+  score: { home: number; away: number }; started: boolean; scorers?: MatchData["scorers"];
 }): MatchData {
   const { fixture, teams } = a;
   const home = teams.find((t) => t.id === fixture.home_team_id);
@@ -30,6 +30,7 @@ export function buildBroadcastData(a: {
     standings: computeStandings(divTeams.length ? divTeams : teams, fx).map((r, k) => ({ pos: k + 1, team: r.name, played: r.played, gd: r.gd, points: r.points, crest: `crest:${r.teamId}` })),
     sponsors: a.sponsors.map((s, k) => ({ name: s.name, image: s.image_path ? `sponsor:${k}` : undefined })),
     lineup: { team: homeName, players: [] },
+    scorers: a.scorers ?? { home: [], away: [] },
   };
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRANDS } from "@/lib/brand";
-import { DEFAULT_MATCH, FORMATS, KICKOFF_DURATION, KICKOFF_STRIP, TEMPLATES, kickoffState, autoTeamColors, drawLiveOverlay, paletteOf, samplePalette, drawScene, initials, parseFormation, resolveTeamColors, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
+import { DEFAULT_MATCH, FORMATS, MATCH_THEMES, RESULT_DURATION, matchThemeIndex, KICKOFF_DURATION, KICKOFF_STRIP, TEMPLATES, kickoffState, autoTeamColors, drawLiveOverlay, paletteOf, samplePalette, drawScene, initials, parseFormation, resolveTeamColors, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
 
 /** Contexto 2D falso: registra las llamadas de texto y acepta cualquier otra operación. */
 function fakeCtx() {
@@ -61,15 +61,31 @@ describe("drawScene", () => {
     expect(f.texts).toContain("77:00");
   });
 
-  it("medio tiempo y final muestran el resultado y el reloj correspondiente", () => {
+  it("medio tiempo y final muestran la barra de resultado con equipos, goles, goleadores y su pestaña", () => {
     const ht = fakeCtx();
     drawScene(ht.ctx, "halftime", input("broadcast", "horizontal", 2.5));
-    expect(ht.texts).toContain("MEDIO TIEMPO");
-    expect(ht.texts).toContain("45:00");
+    expect(ht.texts).toEqual(expect.arrayContaining(["Medio tiempo", "Leones", "Tigres", "2", "1", "Delantero Nueve 12', 34'", "Medio Ocho 51'"]));
     const ft = fakeCtx();
     drawScene(ft.ctx, "fulltime", input("broadcast", "horizontal", 2.5));
-    expect(ft.texts).toContain("FINAL");
-    expect(ft.texts).toContain("90:00");
+    expect(ft.texts).toContain("Final");
+    expect(ft.texts).not.toContain("Medio tiempo");
+    // antes de entrar y después de salir no hay texto
+    for (const t of [0.1, RESULT_DURATION - 0.02]) {
+      const f = fakeCtx();
+      drawScene(f.ctx, "fulltime", input("broadcast", "horizontal", t));
+      expect(f.texts).toEqual([]);
+    }
+  });
+  it("hay tres temas de color fijos y cada partido usa siempre el mismo", () => {
+    expect(MATCH_THEMES.map((t) => t.id)).toEqual(["cyan", "orange", "green"]);
+    expect(MATCH_THEMES[0].stops[0]).toBe("#0BEDFE");
+    expect(MATCH_THEMES[1].stops[0]).toBe("#EC6034");
+    expect(MATCH_THEMES[2].stops[0]).toBe("#CCFE11");
+    const a = matchThemeIndex({ data: DEFAULT_MATCH });
+    expect(matchThemeIndex({ data: DEFAULT_MATCH })).toBe(a);
+    expect(matchThemeIndex({ theme: 4, data: DEFAULT_MATCH })).toBe(1);
+    const seen = new Set(Array.from({ length: 40 }, (_, k) => matchThemeIndex({ data: { ...DEFAULT_MATCH, home: `Equipo ${k}` } })));
+    expect(seen.size).toBe(3);
   });
 
   it("las tarjetas y el cambio muestran los nombres", () => {

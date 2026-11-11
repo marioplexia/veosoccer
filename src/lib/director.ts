@@ -30,7 +30,7 @@ export type Shot = {
 };
 
 export const DURATIONS: Record<FullScene, number> = {
-  ident: 5.8, matchup: 6, lineupHome: 10, lineupAway: 10, kickoff: 6.8, halftime: 5, fulltime: 5, results: 10, standings: 10,
+  ident: 5.8, matchup: 6, lineupHome: 10, lineupAway: 10, kickoff: 6.8, halftime: 6, fulltime: 6, results: 10, standings: 10,
 };
 export const GOAL_SECONDS = 6;
 export const SCORER_SECONDS = 6;
@@ -150,4 +150,18 @@ export function direct(s: DirectorState, now: number): Shot {
 /** Marcador actual a partir de los goles registrados en la transmisión. */
 export function liveScore(base: { home: number; away: number }, events: LiveEvent[]) {
   return events.reduce((acc, e) => (e.kind === "goal" ? { ...acc, [e.side]: acc[e.side] + 1 } : acc), { ...base });
+}
+
+/** Goleadores por equipo para la barra de resultado: "Nombre 12', 40'". Los goles sin nombre no aparecen. */
+export function scorersOf(events: LiveEvent[]): { home: string[]; away: string[] } {
+  const out = { home: [] as string[], away: [] as string[] };
+  for (const side of ["home", "away"] as const) {
+    const by = new Map<string, number[]>();
+    for (const e of [...events].sort((a, b) => a.at - b.at)) {
+      if (e.kind !== "goal" || e.side !== side || !e.player) continue;
+      by.set(e.player, [...(by.get(e.player) ?? []), e.minute]);
+    }
+    out[side] = [...by].map(([name, mins]) => `${name} ${mins.map((m) => `${m}'`).join(", ")}`);
+  }
+  return out;
 }

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildBroadcastData, buildLineups } from "@/lib/broadcast-data";
 import type { BrandSettings } from "@/lib/brand";
-import { direct, liveScore } from "@/lib/director";
+import { direct, liveScore, scorersOf } from "@/lib/director";
 import { renderBroadcastFrame } from "@/lib/motion/broadcast-frame";
 import { DEFAULT_MATCH, type SceneInput } from "@/lib/motion/scenes";
 import { drawStadium } from "@/lib/motion/stadium";
@@ -70,7 +70,7 @@ export default function BroadcastSimulator(p: {
     });
     const shot = direct(sim.state, sim.now);
     const score = liveScore({ home: 0, away: 0 }, sim.state.events);
-    const data = buildBroadcastData({ fixture: { ...L.fixture, home_score: null, away_score: null }, teams: L.teams, divisionFixtures: L.divFixtures, sponsors: p.sponsors, score, started: sim.state.phase !== "previa" });
+    const data = buildBroadcastData({ fixture: { ...L.fixture, home_score: null, away_score: null }, teams: L.teams, divisionFixtures: L.divFixtures, sponsors: p.sponsors, score, started: sim.state.phase !== "previa", scorers: scorersOf(sim.state.events.filter((e) => e.at <= sim.now)) });
     const input: SceneInput = {
       w: W, h: H, t: 0, kind: "broadcast", colors: p.brand.colors, fonts: p.brand.fonts,
       logo: L.logo?.img ?? null, logoSize: L.logo ? { w: L.logo.w, h: L.logo.h } : null,

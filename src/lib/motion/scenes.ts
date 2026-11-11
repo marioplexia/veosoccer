@@ -22,6 +22,8 @@ export type MatchData = {
   homeColor: string; homeColor2: string; awayColor: string; awayColor2: string;
   lineup: { team: string; players: { number: number | null; name: string }[] };
   sponsors: { name: string; image?: string }[];
+  /** Goleadores por equipo, ya con minutos: "Nombre 12', 40'". */
+  scorers: { home: string[]; away: string[] };
 };
 
 export type BugTeam = { name: string; color: string; color2: string; crest?: string };
@@ -68,6 +70,7 @@ export const DEFAULT_MATCH: MatchData = {
   homeColor: "", homeColor2: "", awayColor: "", awayColor2: "",
   lineup: { team: "Leones", players: ["Portero Uno", "Lateral Dos", "Central Tres", "Central Cuatro", "Lateral Cinco", "Medio Seis", "Medio Ocho", "Medio Diez", "Extremo Siete", "Delantero Nueve", "Extremo Once"].map((name, k) => ({ number: [1, 2, 3, 4, 5, 6, 8, 10, 7, 9, 11][k], name })) },
   sponsors: [{ name: "Tu patrocinador" }],
+  scorers: { home: ["Delantero Nueve 12', 34'"], away: ["Medio Ocho 51'"] },
 };
 
 export type SceneId = "lineup" | "teamGoal" | "ident" | "matchday" | "matchup" | "totw" | "potw" | "results" | "standings" | "goal" | "halftime" | "fulltime" | "kickoff" | "yellow" | "red" | "substitution";
@@ -86,8 +89,8 @@ export const TEMPLATES: TemplateDef[] = [
   { id: "results", kind: "broadcast", label: "Resultados de la jornada", description: "Lista de resultados con escudos; sale con barrido de color y deja ver tu foto de fondo.", duration: 10, fields: ["resultsPick", "tableTitle", "background"], poster: 5 },
   { id: "standings", kind: "broadcast", label: "Tabla de posiciones", description: "Tabla con escudos y puntos, con el mismo movimiento que los resultados.", duration: 10, fields: ["standingsPick", "tableTitle", "background"], poster: 5 },
   { id: "goal", kind: "broadcast", label: "Gol", description: "¡GOL! con el goleador, el minuto y el marcador actualizado.", duration: 5.2, fields: ["match", "home", "away", "homeScore", "awayScore", "side", "player", "minute"] },
-  { id: "halftime", kind: "broadcast", label: "Medio tiempo", description: "Resultado al descanso.", duration: 5, fields: ["match", "home", "away", "homeScore", "awayScore"] },
-  { id: "fulltime", kind: "broadcast", label: "Final del partido", description: "Resultado final.", duration: 5, fields: ["match", "home", "away", "homeScore", "awayScore"] },
+  { id: "halftime", kind: "broadcast", label: "Medio tiempo", description: "Barra de resultado con el tema de color del partido: escudos, nombres, goles, goleadores y la pestaña “Medio tiempo”.", duration: 6, fields: ["match", "home", "away", "homeScore", "awayScore", "homeLogo", "awayLogo"], poster: 3 },
+    { id: "fulltime", kind: "broadcast", label: "Final del partido", description: "La misma barra de resultado con la pestaña “Final”.", duration: 6, fields: ["match", "home", "away", "homeScore", "awayScore", "homeLogo", "awayLogo"], poster: 3 },
   { id: "kickoff", kind: "broadcast", label: "Inicio del partido", description: "Secuencia fija de color (cian, naranja, giro del logo en blanco, verde, cian, naranja) con los equipos abajo. No cambia con la marca.", duration: 6.8, fields: ["match", "home", "away"] },
   { id: "yellow", kind: "broadcast", label: "Tarjeta amarilla", description: "Jugador amonestado y minuto.", duration: 4.6, fields: ["match", "home", "away", "player", "minute"] },
   { id: "red", kind: "broadcast", label: "Tarjeta roja", description: "Jugador expulsado y minuto.", duration: 4.6, fields: ["match", "home", "away", "player", "minute"] },
@@ -114,6 +117,10 @@ export type SceneInput = {
   palette?: string[];
   /** Diseño del marcador (Marca de Transmisión). Por defecto, compacto. */
   scoreStyle?: ScoreboardStyle;
+  /** Tema de color del partido (0 cian, 1 naranja, 2 verde). Si falta, se elige según los equipos. */
+  theme?: number;
+  /** Escenas de resultado: no pintan fondo (van encima de la cámara). */
+  transparent?: boolean;
   tournamentName: string;
   data: MatchData;
 };
@@ -167,19 +174,57 @@ function drawLogo(ctx: Ctx, i: SceneInput, cx: number, cy: number, maxW: number,
 
 /* ───────────── marcador ───────────── */
 
+/**
+ * Los tres temas de color fijos de los marcadores (uno por partido). No dependen de los
+ * equipos ni de la marca: cian→azul→morado, naranja→rosa→morado y lima→verde→turquesa.
+ */
+export const MATCH_THEMES = [
+  { id: "cyan", label: "Cian", stops: ["#0BEDFE", "#12E1FE", "#19CAFE", "#33A7FE", "#5477FF", "#843EFF"] },
+  { id: "orange", label: "Naranja", stops: ["#EC6034", "#EA5443", "#EA4E4A", "#E93F6E", "#E03984", "#A135E0"] },
+  { id: "green", label: "Verde", stops: ["#CCFE11", "#D1FE12", "#8CFD2F", "#61FE42", "#1BF76F", "#07F4D0"] },
+] as const;
+/** Morado oscuro del texto, el reloj y la pestaña. */
+export const THEME_INK = "#37003C";
+
+/** Tema del partido: el indicado o, si no, uno estable según los nombres de los equipos. */
+export function matchThemeIndex(i: Pick<SceneInput, "theme" | "data">): number {
+  const n = MATCH_THEMES.length;
+  if (i.theme != null && Number.isFinite(i.theme)) return ((Math.round(i.theme) % n) + n) % n;
+  let hsh = 0;
+  for (const ch of `${i.data.home}|${i.data.away}`) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
+  return hsh % n;
+}
+
+/** Barra con el degradado del tema y los rayos diagonales claros del lado derecho. */
+function themeBar(ctx: Ctx, i: SceneInput, x: number, y: number, w: number, h: number, r: number) {
+  const stops = MATCH_THEMES[matchThemeIndex(i)].stops;
+  ctx.save();
+  rr(ctx, x, y, w, h, r); ctx.clip();
+  const g = ctx.createLinearGradient(x, 0, x + w, 0);
+  stops.forEach((c, k) => g.addColorStop(k / (stops.length - 1), c));
+  ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+  const last = stops[stops.length - 1];
+  const band = (fx: number, fw: number, col: string, a: number) => {
+    ctx.fillStyle = col; ctx.globalAlpha = a;
+    const bx = x + w * fx, bw = w * fw;
+    ctx.beginPath();
+    ctx.moveTo(bx, y); ctx.lineTo(bx + bw, y); ctx.lineTo(bx + bw + h * 0.55, y + h * 0.55); ctx.lineTo(bx + bw + h * 0.3, y + h * 0.55);
+    ctx.lineTo(bx + bw + h * 0.8, y + h); ctx.lineTo(bx + h * 0.8, y + h); ctx.lineTo(bx + h * 0.3, y + h * 0.45); ctx.lineTo(bx + h * 0.5, y + h * 0.45);
+    ctx.closePath(); ctx.fill();
+  };
+  band(0.66, 0.05, "#FFFFFF", 0.14);
+  band(0.76, 0.07, last, 0.55);
+  band(0.87, 0.04, "#FFFFFF", 0.2);
+  band(0.94, 0.05, last, 0.5);
+  ctx.restore();
+}
+
 /** Gol en curso dentro del marcador: `t` son los segundos desde el gol. */
 export type GoalAnim = { side: "home" | "away"; t: number };
 /** Momento (s) en que el marcador deja de decir GOL y muestra el resultado nuevo. */
 export const GOAL_REVEAL = 3.7;
 
 type Box = { x: number; y: number; w: number; h: number };
-
-function sideTeam(i: SceneInput, side: "home" | "away"): BugTeam {
-  const d = i.data;
-  const home = side === "home";
-  const name = home ? d.home : d.away;
-  return { name, ...resolveTeamColors(name, home ? d.homeColor : d.awayColor, home ? d.homeColor2 : d.awayColor2), crest: home ? "homeLogo" : "awayLogo" };
-}
 
 /** Resultado que se muestra: antes del GOAL_REVEAL el equipo que anota aún tiene un gol menos. */
 function shownScore(i: SceneInput, side: "home" | "away", goal?: GoalAnim) {
@@ -214,14 +259,13 @@ function goalWord(ctx: Ctx, i: SceneInput, cx: number, cy: number, cellW: number
 }
 
 /**
- * Celda con las siglas del equipo. Con gol: se pinta con el color del equipo, las siglas
- * suben, cae “GOL” y al final regresan las siglas.
+ * Celda con las siglas del equipo (sobre el degradado del tema). Con gol: se cubre de morado
+ * oscuro, las siglas suben, cae “GOL” en blanco y al final regresan las siglas.
  */
-function teamCell(ctx: Ctx, i: SceneInput, r: Box, team: BugTeam, base: { bg: string; ink: string }, goal: number | null, px: number) {
+function teamCell(ctx: Ctx, i: SceneInput, r: Box, name: string, ink: string, goal: number | null, px: number) {
   const { x, y, w, h } = r;
   ctx.save();
   ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
-  ctx.fillStyle = base.bg; ctx.fillRect(x, y, w, h);
   const active = goal != null && goal >= 0 && goal < GOAL_REVEAL + 0.8;
   let dy = 0;
   if (active) {
@@ -229,20 +273,16 @@ function teamCell(ctx: Ctx, i: SceneInput, r: Box, team: BugTeam, base: { bg: st
     // barrido con el color del equipo (entra de izquierda; al revelar el resultado sale hacia la derecha)
     const inW = easeOutCubic(progress(tl, 0, 0.3));
     const outX = easeInCubic(progress(tl, GOAL_REVEAL + 0.05, GOAL_REVEAL + 0.35));
-    if (team.color.toUpperCase() !== base.bg.toUpperCase()) {
-      ctx.fillStyle = team.color;
-      ctx.fillRect(x + w * outX, y, w * inW * (1 - outX), h);
-    }
+    ctx.fillStyle = THEME_INK;
+    ctx.fillRect(x + w * outX, y, w * inW * (1 - outX), h);
     // destello blanco al arrancar
     const flash = 1 - progress(tl, 0, 0.35);
     if (flash > 0) { ctx.fillStyle = `rgba(255,255,255,${(0.85 * flash).toFixed(3)})`; ctx.fillRect(x, y, w, h); }
-    const lineOn = contrastRatio(team.color, "#FFFFFF") >= 2.5 ? team.color : readableOn(team.color);
-    goalWord(ctx, i, x + w / 2, y + h / 2, w, h, tl, readableOn(team.color), lineOn);
+    goalWord(ctx, i, x + w / 2, y + h / 2, w, h, tl, "#FFFFFF", THEME_INK);
     // siglas: suben al empezar el gol y regresan desde abajo cuando ya salió el color
     dy = tl < GOAL_REVEAL ? -easeInCubic(progress(tl, 0.15, 0.4)) * h * 1.1 : (1 - easeOutCubic(progress(tl, GOAL_REVEAL + 0.3, GOAL_REVEAL + 0.7))) * h * 1.1;
   }
-  const ink = base.ink;
-  if (Math.abs(dy) < h * 1.05) text(ctx, abbreviation(team.name, "EQU"), x + w / 2, y + h / 2 + dy, i.fonts.heading, px, ink, { maxW: w * 0.84 });
+  if (Math.abs(dy) < h * 1.05) text(ctx, abbreviation(name, "EQU"), x + w / 2, y + h / 2 + dy, i.fonts.heading, px, ink, { maxW: w * 0.84 });
   ctx.restore();
 }
 
@@ -263,96 +303,101 @@ function scoreNumber(ctx: Ctx, i: SceneInput, s: { value: number; scale: number 
   ctx.restore();
 }
 
-/** Estilo compacto: siglas en el color de cada equipo, logo del torneo entre los goles y el reloj abajo. */
+/** Estilo compacto: siglas sobre el degradado del tema, logo del torneo entre los goles y el reloj abajo. */
 function compactScoreboard(ctx: Ctx, i: SceneInput, box: Box, o: { clock: string; goal?: GoalAnim }) {
-  const c = i.colors;
   const { x, y, w, h } = box;
-  const home = sideTeam(i, "home"), away = sideTeam(i, "away");
   const cellW = w * 0.3, midW = w - cellW * 2;
-  const mx = x + cellW, mcx = x + w / 2, mid = y + h / 2;
+  const mcx = x + w / 2, mid = y + h / 2;
   const rad = h * 0.12;
 
   // pestaña del reloj (debajo del centro)
   const tabW = midW * 0.9, tabTop = y + h * 0.5, tabH = h * 1.05;
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = h * 0.3; ctx.shadowOffsetY = h * 0.06;
-  ctx.fillStyle = c.clockBg;
+  ctx.fillStyle = THEME_INK;
   rr(ctx, mcx - tabW / 2, tabTop, tabW, tabH, rad); ctx.fill();
   ctx.restore();
-  text(ctx, o.clock, mcx, y + h * 1.29, i.fonts.numbers, h * 0.46, c.clockText, { maxW: tabW * 0.86 });
+  text(ctx, o.clock, mcx, y + h * 1.29, i.fonts.numbers, h * 0.46, "#FFFFFF", { maxW: tabW * 0.86 });
 
-  // barra superior: celdas de equipo + centro
+  // barra superior con el degradado del tema
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = h * 0.3; ctx.shadowOffsetY = h * 0.06;
-  ctx.fillStyle = c.scoreBg;
+  ctx.fillStyle = THEME_INK;
   rr(ctx, x, y, w, h, rad); ctx.fill();
   ctx.restore();
+  themeBar(ctx, i, x, y, w, h, rad);
   ctx.save();
   rr(ctx, x, y, w, h, rad); ctx.clip();
-  ctx.fillStyle = c.scoreBg; ctx.fillRect(mx, y, midW, h);
   const gl = (side: "home" | "away") => (o.goal && o.goal.side === side ? o.goal.t : null);
-  teamCell(ctx, i, { x, y, w: cellW, h }, home, { bg: home.color, ink: readableOn(home.color) }, gl("home"), h * 0.62);
-  teamCell(ctx, i, { x: x + w - cellW, y, w: cellW, h }, away, { bg: away.color, ink: readableOn(away.color) }, gl("away"), h * 0.62);
+  teamCell(ctx, i, { x, y, w: cellW, h }, i.data.home, THEME_INK, gl("home"), h * 0.62);
+  teamCell(ctx, i, { x: x + w - cellW, y, w: cellW, h }, i.data.away, THEME_INK, gl("away"), h * 0.62);
   if (o.goal) { shine(ctx, box, progress(o.goal.t, 0.25, 0.85)); shine(ctx, box, progress(o.goal.t, GOAL_REVEAL, GOAL_REVEAL + 0.6)); }
   ctx.restore();
 
   // goles a cada lado del logo
   const numPx = h * 0.86;
   const nx = midW * 0.3;
-  scoreNumber(ctx, i, shownScore(i, "home", o.goal), mcx - nx, mid, numPx, c.scoreText);
-  scoreNumber(ctx, i, shownScore(i, "away", o.goal), mcx + nx, mid, numPx, c.scoreText);
+  scoreNumber(ctx, i, shownScore(i, "home", o.goal), mcx - nx, mid, numPx, THEME_INK);
+  scoreNumber(ctx, i, shownScore(i, "away", o.goal), mcx + nx, mid, numPx, THEME_INK);
 
   // logo del torneo al centro, sobresaliendo (rebota con el gol)
   const bounce = o.goal ? 1 + 0.22 * Math.sin(Math.PI * progress(o.goal.t, 0.3, 0.75)) + 0.18 * Math.sin(Math.PI * progress(o.goal.t, GOAL_REVEAL, GOAL_REVEAL + 0.45)) : 1;
-  const ls = h * 1.25 * bounce;
+  centerLogo(ctx, i, mcx, mid + h * 0.05, h * 1.25 * bounce);
+}
+
+/** Logo del torneo (o sus iniciales en un círculo morado) para el centro de los marcadores. */
+function centerLogo(ctx: Ctx, i: SceneInput, cx: number, cy: number, size: number) {
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = h * 0.2;
-  if (!drawLogo(ctx, i, mcx, mid + h * 0.05, ls * 0.8, ls)) {
-    ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(mcx, mid, ls * 0.36, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = size * 0.14;
+  if (!drawLogo(ctx, i, cx, cy, size * 0.85, size)) {
+    ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(cx, cy, size * 0.4, 0, Math.PI * 2); ctx.fill();
     ctx.shadowColor = "transparent";
-    text(ctx, initials(i.tournamentName), mcx, mid, i.fonts.heading, ls * 0.26, c.scoreBg, { maxW: ls * 0.56 });
+    ctx.fillStyle = THEME_INK; ctx.beginPath(); ctx.arc(cx, cy, size * 0.35, 0, Math.PI * 2); ctx.fill();
+    text(ctx, initials(i.tournamentName), cx, cy, i.fonts.heading, size * 0.26, "#FFFFFF", { maxW: size * 0.56 });
   }
   ctx.restore();
 }
 
-/** Estilo barra: logo en círculo | local | franja | resultado | franja | visitante | reloj. */
+/** Estilo barra: logo en círculo | local | resultado | visitante | reloj, sobre el degradado del tema. */
 function barScoreboard(ctx: Ctx, i: SceneInput, box: Box, o: { clock: string; goal?: GoalAnim }) {
-  const c = i.colors;
   const { x, y, w, h } = box;
   const logoD = h * 1.3;
   const startX = x + logoD * 0.55;
   const rest = w - logoD * 0.55;
-  const widths = [0.3, 0.02, 0.17, 0.02, 0.29, 0.2].map((f) => rest * f);
+  const widths = [0.31, 0.17, 0.31, 0.21].map((f) => rest * f);
   const xs: number[] = [];
   widths.reduce((acc, wd) => { xs.push(acc); return acc + wd; }, startX);
   const inner: Box = { x: startX, y, w: rest, h };
+  const rad = h * 0.08;
 
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = h * 0.3; ctx.shadowOffsetY = h * 0.08;
-  ctx.fillStyle = c.barBg;
-  rr(ctx, startX, y, rest, h, h * 0.08); ctx.fill();
+  ctx.fillStyle = THEME_INK;
+  rr(ctx, startX, y, rest, h, rad); ctx.fill();
   ctx.restore();
+  themeBar(ctx, i, startX, y, rest, h, rad);
 
   ctx.save();
-  rr(ctx, startX, y, rest, h, h * 0.08); ctx.clip();
-  const fills = [c.barBg, c.homeStripe, c.scoreBg, c.awayStripe, c.barBg, c.clockBg];
-  widths.forEach((wd, k) => { ctx.fillStyle = fills[k]; ctx.fillRect(xs[k], y, wd + 1, h); });
+  rr(ctx, startX, y, rest, h, rad); ctx.clip();
+  ctx.fillStyle = THEME_INK;
+  ctx.fillRect(xs[1], y, widths[1], h);
+  ctx.fillRect(xs[3], y, widths[3] + 1, h);
   const gl = (side: "home" | "away") => (o.goal && o.goal.side === side ? o.goal.t : null);
   const pad = logoD * 0.45;
-  teamCell(ctx, i, { x: xs[0] + pad, y, w: widths[0] - pad, h }, sideTeam(i, "home"), { bg: c.barBg, ink: c.barText }, gl("home"), h * 0.55);
-  teamCell(ctx, i, { x: xs[4], y, w: widths[4], h }, sideTeam(i, "away"), { bg: c.barBg, ink: c.barText }, gl("away"), h * 0.55);
+  teamCell(ctx, i, { x: xs[0] + pad, y, w: widths[0] - pad, h }, i.data.home, THEME_INK, gl("home"), h * 0.55);
+  teamCell(ctx, i, { x: xs[2], y, w: widths[2], h }, i.data.away, THEME_INK, gl("away"), h * 0.55);
   if (o.goal) { shine(ctx, inner, progress(o.goal.t, 0.25, 0.85)); shine(ctx, inner, progress(o.goal.t, GOAL_REVEAL, GOAL_REVEAL + 0.6)); }
   ctx.restore();
 
   const mid = y + h / 2;
-  const scoreCx = xs[2] + widths[2] / 2;
-  const px = fitPx(ctx, "00 - 00", i.fonts.numbers, h * 0.66, widths[2] * 0.9);
+  const scoreCx = xs[1] + widths[1] / 2;
+  const px = fitPx(ctx, "00 - 00", i.fonts.numbers, h * 0.66, widths[1] * 0.9);
   const gap = px * 0.95;
-  scoreNumber(ctx, i, shownScore(i, "home", o.goal), scoreCx - gap * 0.55, mid, px, c.scoreText);
-  text(ctx, "-", scoreCx, mid, i.fonts.numbers, px, c.scoreText);
-  scoreNumber(ctx, i, shownScore(i, "away", o.goal), scoreCx + gap * 0.55, mid, px, c.scoreText);
+  scoreNumber(ctx, i, shownScore(i, "home", o.goal), scoreCx - gap * 0.55, mid, px, "#FFFFFF");
+  text(ctx, "-", scoreCx, mid, i.fonts.numbers, px, "#FFFFFF");
+  scoreNumber(ctx, i, shownScore(i, "away", o.goal), scoreCx + gap * 0.55, mid, px, "#FFFFFF");
 
-  text(ctx, o.clock, xs[5] + widths[5] / 2, mid, i.fonts.numbers, h * 0.62, c.clockText, { maxW: widths[5] * 0.85 });
+  text(ctx, o.clock, xs[3] + widths[3] / 2, mid, i.fonts.numbers, h * 0.62, "#FFFFFF", { maxW: widths[3] * 0.85 });
 
   const lcx = x + logoD / 2;
   const bounce = o.goal ? 1 + 0.2 * Math.sin(Math.PI * progress(o.goal.t, 0.3, 0.75)) : 1;
@@ -365,9 +410,120 @@ function barScoreboard(ctx: Ctx, i: SceneInput, box: Box, o: { clock: string; go
   ctx.save();
   ctx.beginPath(); ctx.arc(lcx, mid, r, 0, Math.PI * 2); ctx.clip();
   if (!drawLogo(ctx, i, lcx, mid, r * 1.44, r * 1.44)) {
-    text(ctx, i.tournamentName.slice(0, 1).toUpperCase() || "•", lcx, mid, i.fonts.heading, r, c.barText);
+    text(ctx, i.tournamentName.slice(0, 1).toUpperCase() || "•", lcx, mid, i.fonts.heading, r, THEME_INK);
   }
   ctx.restore();
+}
+
+/* ───────────── barra de resultado (medio tiempo / final) ───────────── */
+
+/** Escudo en círculo blanco para los extremos de la barra de resultado. */
+function endCrest(ctx: Ctx, i: SceneInput, key: string, name: string, cx: number, cy: number, r: number, k: number) {
+  if (k <= 0.01) return;
+  ctx.save();
+  ctx.translate(cx, cy); ctx.scale(k, lerp(0.6, 1, k)); ctx.translate(-cx, -cy);
+  const im = i.images?.[key];
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = r * 0.3;
+  ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  if (im) contain(ctx, im, cx, cy, r * 1.62, r * 1.62);
+  else {
+    ctx.fillStyle = THEME_INK; ctx.beginPath(); ctx.arc(cx, cy, r * 0.84, 0, Math.PI * 2); ctx.fill();
+    text(ctx, initials(name), cx, cy, i.fonts.heading, r * 0.7, "#FFFFFF", { maxW: r * 1.3 });
+  }
+  ctx.restore();
+}
+
+/**
+ * Barra de resultado con el tema del partido. `tl` son los segundos desde que entra y `outAt`
+ * cuándo empieza a salir. Entrada: se abre la barra y aparecen los escudos, los nombres salen
+ * de detrás del logo hacia los lados, aparecen los goles y bajan la franja blanca de goleadores
+ * y la pestaña. La salida es la misma secuencia al revés.
+ */
+export function resultBar(ctx: Ctx, i: SceneInput, cx: number, top: number, W: number, tl: number, outAt: number, label: string) {
+  const d = i.data;
+  const H = W / 18.5;
+  const out = (a: number, b: number) => 1 - easeInCubic(progress(tl, outAt + a, outAt + b));
+  const open = easeOutCubic(progress(tl, 0, 0.3)) * out(0.35, 0.6);
+  if (open <= 0.001) return;
+  const crestK = easeOutBack(progress(tl, 0.08, 0.45)) * out(0.35, 0.6);
+  const spread = easeOutCubic(progress(tl, 0.2, 0.7)) * out(0.12, 0.42);
+  const scoreK = easeOutCubic(progress(tl, 0.35, 0.75)) * out(0.1, 0.35);
+  const drop = easeOutCubic(progress(tl, 0.35, 0.7)) * out(0, 0.28);
+
+  const half = (W / 2) * open;
+  const x0 = cx - half, x1 = cx + half;
+  const stripH = H * 0.68;
+  const tabW = H * 5.4, tabH = H * 1.02;
+
+  // franja blanca de goleadores y pestaña: bajan desde detrás de la barra
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0 - H, top + H * 0.5, half * 2 + H * 2, H * 2.4); ctx.clip();
+  const dy = (drop - 1) * (stripH + H * 0.4);
+  ctx.save();
+  ctx.translate(0, dy);
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.25)"; ctx.shadowBlur = H * 0.3; ctx.shadowOffsetY = H * 0.06;
+  ctx.fillStyle = "#FFFFFF"; ctx.fillRect(x0, top + H - 1, x1 - x0, stripH + 1);
+  ctx.restore();
+  // rayos tenues al final de la franja
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0, top + H, x1 - x0, stripH); ctx.clip();
+  ctx.fillStyle = THEME_INK; ctx.globalAlpha = 0.06;
+  for (const f of [0.8, 0.9]) {
+    const bx = x0 + (x1 - x0) * f;
+    ctx.beginPath(); ctx.moveTo(bx, top + H); ctx.lineTo(bx + H * 0.9, top + H); ctx.lineTo(bx + H * 1.6, top + H + stripH); ctx.lineTo(bx + H * 0.7, top + H + stripH); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  const sy = top + H + stripH * 0.5, spx = H * 0.3;
+  const edge = H * 2.37;
+  ctx.save(); ctx.globalAlpha = drop;
+  if (d.scorers.home.length) text(ctx, d.scorers.home.join("   "), cx - edge - H * 0.75, sy, i.fonts.body, spx, THEME_INK, { align: "right", maxW: W / 2 - edge - H * 2.2 });
+  if (d.scorers.away.length) text(ctx, d.scorers.away.join("   "), cx + edge + H * 0.75, sy, i.fonts.body, spx, THEME_INK, { align: "left", maxW: W / 2 - edge - H * 2.2 });
+  ctx.restore();
+  ctx.restore();
+  // pestaña central
+  ctx.save();
+  ctx.translate(0, (drop - 1) * tabH);
+  ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = H * 0.3; ctx.shadowOffsetY = H * 0.06;
+  ctx.fillStyle = THEME_INK;
+  rr(ctx, cx - tabW / 2, top + H * 0.6, tabW, H * 0.4 + tabH, H * 0.16); ctx.fill();
+  ctx.shadowColor = "transparent";
+  text(ctx, label, cx, top + H + tabH * 0.5, i.fonts.heading, H * 0.44, "#FFFFFF", { maxW: tabW * 0.86 });
+  ctx.restore();
+  ctx.restore();
+
+  // barra con el degradado del tema
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = H * 0.35; ctx.shadowOffsetY = H * 0.06;
+  ctx.fillStyle = THEME_INK; ctx.fillRect(x0, top, x1 - x0, H);
+  ctx.restore();
+  themeBar(ctx, i, x0, top, x1 - x0, H, 0);
+
+  // nombres y goles: salen de detrás del logo
+  const mid = top + H / 2;
+  const namePx = H * 0.66, numPx = H * 0.9;
+  const nameEdge = lerp(H * 0.2, edge, spread), numX = lerp(H * 0.15, H * 1.25, scoreK);
+  const side = (sgn: -1 | 1, name: string, score: number) => {
+    ctx.save();
+    ctx.beginPath();
+    if (sgn < 0) ctx.rect(x0, top - H, cx - H * 0.35 - x0, H * 3); else ctx.rect(cx + H * 0.35, top - H, x1 - cx - H * 0.35, H * 3);
+    ctx.clip();
+    ctx.globalAlpha = clamp01(spread * 1.6);
+    text(ctx, name, cx + sgn * nameEdge, mid, i.fonts.heading, namePx, THEME_INK, { align: sgn < 0 ? "right" : "left", maxW: W / 2 - edge - H * 1.4 });
+    ctx.globalAlpha = clamp01(scoreK * 1.6);
+    text(ctx, String(score), cx + sgn * numX, mid, i.fonts.numbers, numPx, THEME_INK);
+    ctx.restore();
+  };
+  side(-1, d.home, d.homeScore);
+  side(1, d.away, d.awayScore);
+
+  // logo al centro y escudos en los extremos
+  centerLogo(ctx, i, cx, top + H * 0.5, H * 1.55 * (0.6 + 0.4 * open));
+  const cr = H * 1.02;
+  endCrest(ctx, i, "homeLogo", d.home, x0, top + H * 0.8, cr, crestK);
+  endCrest(ctx, i, "awayLogo", d.away, x1, top + H * 0.8, cr, crestK);
 }
 
 /** Marcador del partido en el estilo elegido en la Marca de Transmisión. `box.h` es la altura de la barra. */
@@ -702,32 +858,19 @@ function sceneGoal(ctx: Ctx, i: SceneInput) {
   drawScoreboardIn(ctx, i, 1.2, outAt, D, { clock: clockText(data.minute), goalSide: data.side, goalAt: 0 });
 }
 
-function versus(ctx: Ctx, i: SceneInput, middle: string, midFont: FontSpec, midPx: number) {
-  const { w, h, data } = i;
-  const u = Math.min(w, h) / 1080;
-  const ink = inkOf(i);
-  const cy = h * 0.5;
-  const name = { stroke: STROKE, strokeW: 12 * u };
-  if (w >= h) {
-    text(ctx, data.home.toUpperCase(), w * 0.27, cy, i.fonts.heading, 84 * u, ink, { maxW: w * 0.34, ...name });
-    text(ctx, middle, w / 2, cy, midFont, midPx * u, ink, { maxW: w * 0.26, stroke: STROKE, strokeW: 18 * u });
-    text(ctx, data.away.toUpperCase(), w * 0.73, cy, i.fonts.heading, 84 * u, ink, { maxW: w * 0.34, ...name });
-  } else {
-    text(ctx, data.home.toUpperCase(), w / 2, cy - midPx * 0.8 * u, i.fonts.heading, 78 * u, ink, { maxW: w * 0.88, ...name });
-    text(ctx, middle, w / 2, cy, midFont, midPx * 1.1 * u, ink, { maxW: w * 0.86, stroke: STROKE, strokeW: 18 * u });
-    text(ctx, data.away.toUpperCase(), w / 2, cy + midPx * 0.8 * u, i.fonts.heading, 78 * u, ink, { maxW: w * 0.88, ...name });
+/** Medio tiempo / final: la barra de resultado con el tema del partido, pensada para ir sobre la cámara. */
+export const RESULT_DURATION = 6;
+function sceneResult(ctx: Ctx, i: SceneInput, label: string) {
+  const { w, h, t } = i;
+  if (!i.transparent) {
+    // fondo oscuro neutro (en la transmisión, la barra va encima de la cámara)
+    const g = ctx.createLinearGradient(0, 0, w, h);
+    g.addColorStop(0, "#0B0F19"); g.addColorStop(1, "#1E2536");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    shards(ctx, w, h, t, "#FFFFFF", 0.02);
   }
-}
-
-function sceneResult(ctx: Ctx, i: SceneInput, headline: string, clock: string) {
-  const D = 5;
-  const outAt = D - 0.45;
-  eventStage(ctx, i, D);
-  slam(ctx, i, headline, EVENT_LEAD, i.h * 0.26, 0.19, D, outAt);
-  ctx.save(); ctx.globalAlpha = fade(i.t, 1.15, outAt, D);
-  versus(ctx, i, `${i.data.homeScore} - ${i.data.awayScore}`, i.fonts.numbers, 230);
-  ctx.restore();
-  drawScoreboardIn(ctx, i, 1.45, outAt, D, { clock });
+  const W = Math.min(w * 0.84, h * 2.2);
+  resultBar(ctx, i, w / 2, h * (i.transparent ? 0.76 : 0.46), W, t - 0.2, RESULT_DURATION - 0.2 - 0.7, label);
 }
 
 /* ───────────── inicio del partido: secuencia fija ───────────── */
@@ -1552,7 +1695,7 @@ export function drawLiveOverlay(ctx: Ctx, i: SceneInput, o: LiveOverlay) {
 
 export function drawScene(ctx: Ctx, id: SceneId, input: SceneInput) {
   ctx.save();
-  ctx.clearRect(0, 0, input.w, input.h);
+  if (!input.transparent) ctx.clearRect(0, 0, input.w, input.h);
   switch (id) {
     case "ident": sceneIdent(ctx, input); break;
     case "matchday": sceneMatchday(ctx, input); break;
@@ -1564,8 +1707,8 @@ export function drawScene(ctx: Ctx, id: SceneId, input: SceneInput) {
     case "results": sceneResults(ctx, input); break;
     case "standings": sceneStandings(ctx, input); break;
     case "goal": sceneGoal(ctx, input); break;
-    case "halftime": sceneResult(ctx, input, "MEDIO TIEMPO", "45:00"); break;
-    case "fulltime": sceneResult(ctx, input, "FINAL", "90:00"); break;
+    case "halftime": sceneResult(ctx, input, "Medio tiempo"); break;
+    case "fulltime": sceneResult(ctx, input, "Final"); break;
     case "kickoff": sceneKickoff(ctx, input); break;
     case "yellow": sceneCard(ctx, input, "#FACC15", "TARJETA AMARILLA"); break;
     case "red": sceneCard(ctx, input, "#DC2626", "TARJETA ROJA"); break;

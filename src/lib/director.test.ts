@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DURATIONS, GOAL_SECONDS, SPONSOR_SECONDS, direct, liveScore, matchClock, matchMinute, type DirectorState } from "./director";
+import { DURATIONS, GOAL_SECONDS, SPONSOR_SECONDS, direct, liveScore, scorersOf, matchClock, matchMinute, type DirectorState } from "./director";
 
 const T0 = 1_000_000;
 const base = (over: Partial<DirectorState> = {}): DirectorState => ({
@@ -110,5 +110,17 @@ describe("liveScore", () => {
     expect(liveScore({ home: 1, away: 0 }, [
       { kind: "goal", at: 1, side: "away", minute: 3 }, { kind: "yellow", at: 2, side: "home", minute: 4 }, { kind: "goal", at: 3, side: "away", minute: 5 },
     ])).toEqual({ home: 1, away: 2 });
+  });
+});
+
+describe("scorersOf", () => {
+  it("agrupa los goles con nombre por jugador, en orden, y omite los que no tienen nombre", () => {
+    const ev = [
+      { kind: "goal" as const, at: 3, side: "home" as const, minute: 34, player: "Ana" },
+      { kind: "goal" as const, at: 1, side: "home" as const, minute: 12, player: "Ana" },
+      { kind: "goal" as const, at: 2, side: "away" as const, minute: 20 },
+      { kind: "goal" as const, at: 4, side: "away" as const, minute: 51, player: "Luz" },
+    ];
+    expect(scorersOf(ev)).toEqual({ home: ["Ana 12', 34'"], away: ["Luz 51'"] });
   });
 });

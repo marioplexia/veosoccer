@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Room } from "livekit-client";
 import type { BrandSettings } from "@/lib/brand";
-import { direct, liveScore, matchClock, matchMinute, type DirectorState, type LiveEvent, type Phase, type Shot, type Side } from "@/lib/director";
+import { direct, liveScore, scorersOf, matchClock, matchMinute, type DirectorState, type LiveEvent, type Phase, type Shot, type Side } from "@/lib/director";
 import { buildBroadcastData, buildLineups } from "@/lib/broadcast-data";
 import { renderBroadcastFrame } from "@/lib/motion/broadcast-frame";
 import type { MatchData, SceneInput } from "@/lib/motion/scenes";
@@ -116,9 +116,9 @@ export default function LiveStudio(p: Props) {
 
   // Datos para los gráficos (tabla y resultados con el marcador en vivo).
   const matchData = useMemo((): MatchData => buildBroadcastData({
-    fixture: p.fixture, teams: p.teams, divisionFixtures: p.divisionFixtures, sponsors: p.sponsors, score, started: phase !== "previa",
+    fixture: p.fixture, teams: p.teams, divisionFixtures: p.divisionFixtures, sponsors: p.sponsors, score, started: phase !== "previa", scorers: scorersOf(events),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [p.fixture, p.teams, p.divisionFixtures, p.sponsors, phase, score.home, score.away]);
+  }), [p.fixture, p.teams, p.divisionFixtures, p.sponsors, phase, score.home, score.away, events]);
   const lineups = useMemo(() => buildLineups(p.fixture, p.teams, p.players), [p.fixture, p.teams, p.players]);
 
   const live = useRef({ directorState, matchData, images, logo, lineups });

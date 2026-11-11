@@ -45,8 +45,8 @@ export type CustomColor = { id: string; name: string; hex: string };
 
 export type ScoreboardStyle = "compact" | "bar";
 export const SCOREBOARD_STYLES: { id: ScoreboardStyle; label: string; hint: string }[] = [
-  { id: "compact", label: "Compacto", hint: "Siglas con el color de cada equipo, tu logo entre los goles y el reloj abajo." },
-  { id: "bar", label: "Barra", hint: "Barra horizontal: logo en círculo, local, resultado, visitante y reloj." },
+  { id: "compact", label: "Compacto", hint: "Siglas sobre el degradado del partido, tu logo entre los goles y el reloj abajo." },
+  { id: "bar", label: "Barra", hint: "Barra horizontal con el degradado del partido: logo, local, resultado, visitante y reloj." },
 ];
 
 export type BrandSettings = {

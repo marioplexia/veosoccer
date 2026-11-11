@@ -18,7 +18,10 @@ export type Lineups = { home: MatchData["lineup"]; away: MatchData["lineup"] };
 export function renderBroadcastFrame(ctx: CanvasRenderingContext2D, shot: Shot, input: SceneInput, lineups: Lineups, drawCamera: (ctx: CanvasRenderingContext2D) => void) {
   if (shot.full) {
     const lineup = shot.full.scene === "lineupHome" ? lineups.home : shot.full.scene === "lineupAway" ? lineups.away : input.data.lineup;
-    drawScene(ctx, SCENE_OF[shot.full.scene], { ...input, t: shot.full.t, data: { ...input.data, lineup } });
+    // Medio tiempo y final: la barra de resultado va encima de la cámara.
+    const overCamera = shot.full.scene === "halftime" || shot.full.scene === "fulltime";
+    if (overCamera) drawCamera(ctx);
+    drawScene(ctx, SCENE_OF[shot.full.scene], { ...input, t: shot.full.t, transparent: overCamera, data: { ...input.data, lineup } });
     return;
   }
   drawCamera(ctx);
