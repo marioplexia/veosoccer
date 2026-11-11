@@ -120,7 +120,7 @@ export type SceneInput = {
 
 /* ───────────── utilidades de dibujo ───────────── */
 
-const fontStr = (f: FontSpec, px: number) => `${f.italic ? "italic " : ""}${f.weight} ${Math.max(1, Math.round(px))}px "${f.family}", system-ui, sans-serif`;
+export const fontStr = (f: FontSpec, px: number) => `${f.italic ? "italic " : ""}${f.weight} ${Math.max(1, Math.round(px))}px "${f.family}", system-ui, sans-serif`;
 
 function fitPx(ctx: Ctx, s: string, f: FontSpec, px: number, maxW: number) {
   ctx.font = fontStr(f, px);
@@ -129,7 +129,7 @@ function fitPx(ctx: Ctx, s: string, f: FontSpec, px: number, maxW: number) {
 }
 
 type TextOpts = { align?: CanvasTextAlign; maxW?: number; stroke?: string; strokeW?: number; alpha?: number };
-function text(ctx: Ctx, s: string, x: number, y: number, f: FontSpec, px: number, color: string, o: TextOpts = {}) {
+export function text(ctx: Ctx, s: string, x: number, y: number, f: FontSpec, px: number, color: string, o: TextOpts = {}) {
   const size = o.maxW ? fitPx(ctx, s, f, px, o.maxW) : px;
   ctx.save();
   ctx.font = fontStr(f, size);
@@ -147,7 +147,7 @@ function text(ctx: Ctx, s: string, x: number, y: number, f: FontSpec, px: number
   ctx.restore();
 }
 
-function rr(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
+export function rr(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
   const k = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
   ctx.moveTo(x + k, y);
@@ -669,7 +669,7 @@ function posterBase(ctx: Ctx, i: SceneInput) {
   shards(ctx, i.w, i.h, i.t, inkOf(i), 0.02);
 }
 
-function contain(ctx: Ctx, im: SceneImage, cx: number, cy: number, maxW: number, maxH: number) {
+export function contain(ctx: Ctx, im: SceneImage, cx: number, cy: number, maxW: number, maxH: number) {
   const k = Math.min(maxW / im.w, maxH / im.h);
   ctx.drawImage(im.img, cx - (im.w * k) / 2, cy - (im.h * k) / 2, im.w * k, im.h * k);
 }

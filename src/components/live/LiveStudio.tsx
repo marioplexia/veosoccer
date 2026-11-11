@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Room } from "livekit-client";
 import type { BrandSettings } from "@/lib/brand";
-import { direct, liveScore, matchClock, matchMinute, type DirectorState, type FullScene, type LiveEvent, type Phase, type Shot, type Side } from "@/lib/director";
-import { formatKickoff } from "@/lib/format";
-import { mediaUrl } from "@/lib/media";
-import { DEFAULT_MATCH, drawLiveOverlay, drawScene, resolveTeamColors, type MatchData, type SceneId, type SceneImage, type SceneInput } from "@/lib/motion/scenes";
-import { computeStandings } from "@/lib/standings";
+import { direct, liveScore, matchClock, matchMinute, type DirectorState, type LiveEvent, type Phase, type Shot, type Side } from "@/lib/director";
+import { buildBroadcastData, buildLineups } from "@/lib/broadcast-data";
+import { renderBroadcastFrame } from "@/lib/motion/broadcast-frame";
+import type { MatchData, SceneInput } from "@/lib/motion/scenes";
+import { useBroadcastImages } from "./useBroadcastImages";
 import { createClient } from "@/lib/supabase/client";
 import type { Fixture, Player, Sponsor, Team } from "@/lib/types";
 import { useGoogleFonts } from "@/components/brand/useGoogleFonts";
@@ -18,10 +18,6 @@ type Status = "setup" | "connecting" | "live" | "ensayo" | "ended";
 type Ev = LiveEvent & { id: string; goalRowId?: string };
 type Picker = { kind: "goal" | "yellow" | "red" | "sub"; side?: Side; eventId?: string; step: "team" | "player" | "in" };
 
-const SCENE_OF: Record<FullScene, SceneId> = {
-  ident: "ident", matchup: "matchup", lineupHome: "lineup", lineupAway: "lineup", kickoff: "kickoff",
-  halftime: "halftime", fulltime: "fulltime", results: "results", standings: "standings",
-};
 const NEXT_PHASE: Record<Phase, { to: Phase | null; label: string }> = {
   previa: { to: "1T", label: "▶ Iniciar 1er tiempo" },
   "1T": { to: "descanso", label: "⏸ Medio tiempo" },
@@ -29,17 +25,6 @@ const NEXT_PHASE: Record<Phase, { to: Phase | null; label: string }> = {
   "2T": { to: "final", label: "🏁 Final del partido" },
   final: { to: null, label: "" },
 };
-
-async function loadImage(url: string | null): Promise<SceneImage | null> {
-  if (!url) return null;
-  return new Promise((res) => {
-    const img = new Image();
-    if (!/^(blob:|data:)/.test(url)) img.crossOrigin = "anonymous";
-    img.onload = () => res({ img, w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = () => res(null);
-    img.src = url;
-  });
-}
 
 type Props = {
   tournament: { id: string; name: string };
@@ -63,9 +48,6 @@ export default function LiveStudio(p: Props) {
   const broadcastIdRef = useRef<string | null>(null);
   const storeKey = `tx:${p.fixture.id}`;
 
-  const home = p.teams.find((t) => t.id === p.fixture.home_team_id);
-  const away = p.teams.find((t) => t.id === p.fixture.away_team_id);
-  const homeName = home?.name ?? "Local", awayName = away?.name ?? "Visitante";
   const base = { home: p.fixture.home_score ?? 0, away: p.fixture.away_score ?? 0 };
 
   // Estado del partido (se guarda en el dispositivo por si se recarga la página).
@@ -78,8 +60,7 @@ export default function LiveStudio(p: Props) {
   const [camError, setCamError] = useState<string | null>(null);
   const [picker, setPicker] = useState<Picker | null>(null);
   const [now, setNow] = useState(Date.now());
-  const [images, setImages] = useState<Record<string, SceneImage>>({});
-  const [logo, setLogo] = useState<SceneImage | null>(null);
+  const { images, logo } = useBroadcastImages(supabase, { brandLogoPath: p.brandLogoPath, teams: p.teams, sponsors: p.sponsors, homeId: p.fixture.home_team_id, awayId: p.fixture.away_team_id });
 
   // Recupera el partido en curso si la página se recargó (solo en el navegador, tras montar).
   useEffect(() => {
@@ -104,26 +85,6 @@ export default function LiveStudio(p: Props) {
   useEffect(() => {
     Promise.all(Object.values(p.brand.fonts).map((f) => document.fonts.load(`${f.italic ? "italic " : ""}${f.weight} 48px "${f.family}"`))).catch(() => undefined).then(() => setFontsReady((n) => n + 1));
   }, [p.brand.fonts]);
-
-  // Imágenes: logo de la marca, escudos, patrocinadores.
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      const lg = await loadImage(p.brandLogoPath ? supabase.storage.from("brand-logos").getPublicUrl(p.brandLogoPath).data.publicUrl : null);
-      const entries: [string, SceneImage | null][] = await Promise.all([
-        ...p.teams.map(async (t) => [`crest:${t.id}`, await loadImage(mediaUrl(supabase, t.logo_path))] as [string, SceneImage | null]),
-        ...p.sponsors.map(async (s, k) => [`sponsor:${k}`, await loadImage(mediaUrl(supabase, s.image_path))] as [string, SceneImage | null]),
-      ]);
-      if (!alive) return;
-      const map: Record<string, SceneImage> = {};
-      for (const [k, v] of entries) if (v) map[k] = v;
-      if (map[`crest:${p.fixture.home_team_id}`]) map.homeLogo = map[`crest:${p.fixture.home_team_id}`];
-      if (map[`crest:${p.fixture.away_team_id}`]) map.awayLogo = map[`crest:${p.fixture.away_team_id}`];
-      setImages(map);
-      setLogo(lg);
-    })();
-    return () => { alive = false; };
-  }, [supabase, p.brandLogoPath, p.teams, p.sponsors, p.fixture.home_team_id, p.fixture.away_team_id]);
 
   // Cámara trasera + micrófono.
   useEffect(() => {
@@ -153,28 +114,14 @@ export default function LiveStudio(p: Props) {
   };
 
   // Datos para los gráficos (tabla y resultados con el marcador en vivo).
-  const matchData = useMemo((): MatchData => {
-    const fx = p.divisionFixtures.map((f) => (f.id === p.fixture.id && phase !== "previa" ? { ...f, home_score: score.home, away_score: score.away } : f));
-    const nm = (id: string) => p.teams.find((t) => t.id === id)?.name ?? "?";
-    const roundFx = fx.filter((f) => f.round === p.fixture.round);
-    const stand = computeStandings(p.teams, fx);
-    const hc = resolveTeamColors(homeName, home?.color ?? "", home?.color2 ?? "");
-    const ac = resolveTeamColors(awayName, away?.color ?? "", away?.color2 ?? "");
-    return {
-      ...DEFAULT_MATCH,
-      home: homeName, away: awayName, homeScore: score.home, awayScore: score.away,
-      homeColor: hc.color, homeColor2: hc.color2, awayColor: ac.color, awayColor2: ac.color2,
-      round: p.fixture.round, subtitle: formatKickoff(p.fixture.kickoff),
-      tableTitle: `Jornada ${p.fixture.round}`,
-      results: roundFx.map((f) => ({ home: nm(f.home_team_id), away: nm(f.away_team_id), homeScore: f.home_score, awayScore: f.away_score, homeCrest: `crest:${f.home_team_id}`, awayCrest: `crest:${f.away_team_id}` })),
-      standings: stand.map((r, k) => ({ pos: k + 1, team: r.name, played: r.played, gd: r.gd, points: r.points, crest: `crest:${r.teamId}` })),
-      sponsors: p.sponsors.map((s, k) => ({ name: s.name, image: s.image_path ? `sponsor:${k}` : undefined })),
-      lineup: { team: homeName, players: [] },
-    };
-  }, [p.divisionFixtures, p.fixture, p.teams, p.sponsors, phase, score.home, score.away, homeName, awayName, home, away]);
+  const matchData = useMemo((): MatchData => buildBroadcastData({
+    fixture: p.fixture, teams: p.teams, divisionFixtures: p.divisionFixtures, sponsors: p.sponsors, score, started: phase !== "previa",
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [p.fixture, p.teams, p.divisionFixtures, p.sponsors, phase, score.home, score.away]);
+  const lineups = useMemo(() => buildLineups(p.fixture, p.teams, p.players), [p.fixture, p.teams, p.players]);
 
-  const live = useRef({ directorState, matchData, images, logo });
-  live.current = { directorState, matchData, images, logo };
+  const live = useRef({ directorState, matchData, images, logo, lineups });
+  live.current = { directorState, matchData, images, logo, lineups };
 
   // Bucle de dibujo: video + gráficos según el director.
   useEffect(() => {
@@ -186,33 +133,26 @@ export default function LiveStudio(p: Props) {
         const L = live.current;
         const t = Date.now();
         const shot: Shot = direct(L.directorState, t);
-        const lineupSide = shot.full?.scene === "lineupHome" ? p.fixture.home_team_id : shot.full?.scene === "lineupAway" ? p.fixture.away_team_id : null;
-        const data: MatchData = lineupSide
-          ? { ...L.matchData, lineup: { team: lineupSide === p.fixture.home_team_id ? L.matchData.home : L.matchData.away, players: p.players.filter((x) => x.team_id === lineupSide).slice(0, 18).map((x) => ({ number: x.number, name: x.name })) } }
-          : L.matchData;
         const input: SceneInput = {
-          w: W, h: H, t: shot.full?.t ?? 0, kind: "broadcast", colors: p.brand.colors, fonts: p.brand.fonts,
+          w: W, h: H, t: 0, kind: "broadcast", colors: p.brand.colors, fonts: p.brand.fonts,
           logo: L.logo?.img ?? null, logoSize: L.logo ? { w: L.logo.w, h: L.logo.h } : null,
-          tournamentName: p.tournament.name, data, images: L.images,
+          tournamentName: p.tournament.name, data: L.matchData, images: L.images,
         };
-        if (shot.full) {
-          drawScene(ctx, SCENE_OF[shot.full.scene], input);
-        } else {
-          ctx.fillStyle = "#0B0F19"; ctx.fillRect(0, 0, W, H);
+        renderBroadcastFrame(ctx, shot, input, L.lineups, (c2) => {
+          c2.fillStyle = "#0B0F19"; c2.fillRect(0, 0, W, H);
           if (v && v.readyState >= 2 && v.videoWidth) {
             const k = Math.max(W / v.videoWidth, H / v.videoHeight);
             const vw = v.videoWidth * k, vh = v.videoHeight * k;
-            ctx.drawImage(v, (W - vw) / 2, (H - vh) / 2, vw, vh);
+            c2.drawImage(v, (W - vw) / 2, (H - vh) / 2, vw, vh);
           }
-          drawLiveOverlay(ctx, input, { scoreboard: shot.scoreboard, clock: shot.clock, goal: shot.goal, lower: shot.lower, sponsor: shot.sponsor });
-        }
+        });
       }
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
     const tick = setInterval(() => setNow(Date.now()), 500);
     return () => { cancelAnimationFrame(raf); clearInterval(tick); };
-  }, [p.brand, p.players, p.fixture.home_team_id, p.fixture.away_team_id, p.tournament.name, fontsReady]);
+  }, [p.brand, p.tournament.name, fontsReady]);
 
   /* ───── salir al aire ───── */
   async function goLive() {
@@ -307,6 +247,7 @@ export default function LiveStudio(p: Props) {
   const inPlay = phase === "1T" || phase === "2T";
   const onAir = status === "live" || status === "ensayo";
   const hc = matchData.homeColor, ac = matchData.awayColor;
+  const homeName = matchData.home, awayName = matchData.away;
   const big = "rounded-2xl px-4 py-4 text-lg font-extrabold shadow-sm active:scale-[.98] disabled:opacity-40";
 
   return (

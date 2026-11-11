@@ -8,8 +8,10 @@ import { ACCEPTED_IMAGES, mediaUrl, prepareImage, removeMedia, uploadMedia } fro
 import { createClient } from "@/lib/supabase/client";
 import { btnDanger, btnGhost, btnPrimary, Card, Empty, ErrorMsg, inputCls } from "@/components/ui";
 import type { BoardData } from "./Board";
+import BroadcastSimulator from "@/components/live/BroadcastSimulator";
+import { sanitizeBrand } from "@/lib/brand";
 
-export default function TransmitTab({ tournament, divisions, teams, fixtures, sponsors, broadcastSettings }: BoardData) {
+export default function TransmitTab({ tournament, divisions, teams, fixtures, players, sponsors, broadcastSettings, brands }: BoardData) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
   const [server, setServer] = useState(broadcastSettings.rtmp_url);
@@ -87,6 +89,15 @@ export default function TransmitTab({ tournament, divisions, teams, fixtures, sp
             )}
           </>
         )}
+      </Card>
+
+      <Card title="Simulador de la transmisión">
+        <BroadcastSimulator
+          tournamentName={tournament.name}
+          brand={sanitizeBrand("broadcast", brands.find((b) => b.kind === "broadcast")?.settings)}
+          brandLogoPath={brands.find((b) => b.kind === "broadcast")?.logo_path ?? null}
+          teams={teams} fixtures={fixtures} players={players} sponsors={sponsors} adEveryMinutes={broadcastSettings.ad_every_minutes}
+        />
       </Card>
 
       <Card title="2. Facebook (una sola vez)">

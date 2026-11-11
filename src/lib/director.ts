@@ -26,7 +26,7 @@ export type Shot = {
   clock: string;
   goal?: { side: Side; t: number; player?: string; minute: number };
   lower?: { kind: "yellow" | "red" | "sub" | "scorer"; side: Side; t: number; text: string; minute: number };
-  sponsor?: { index: number; t: number };
+  sponsor?: { index: number; t: number; slot: number }; // slot par: tarjeta; impar: franja LED
 };
 
 export const DURATIONS: Record<FullScene, number> = {
@@ -82,7 +82,7 @@ export function direct(s: DirectorState, now: number): Shot {
     if (s.sponsors <= 0) return undefined;
     const slot = Math.floor(sinceSec / every);
     const t = sinceSec - slot * every;
-    return t < SPONSOR_SECONDS ? { index: slot % s.sponsors, t } : undefined;
+    return t < SPONSOR_SECONDS ? { index: slot % s.sponsors, t, slot } : undefined;
   };
 
   const breakLoop = (opening: FullScene, cycle: (FullScene | "camera")[]) => {
