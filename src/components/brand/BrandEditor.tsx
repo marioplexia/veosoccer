@@ -8,6 +8,7 @@ import type { Division, Fixture, Player, Team } from "@/lib/types";
 import { btnDanger, btnGhost, btnPrimary, Card, ErrorMsg } from "@/components/ui";
 import ColorField from "@/components/ColorField";
 import BrandPreview from "./BrandPreview";
+import ScoreboardPreview from "./ScoreboardPreview";
 import FontEditor from "./FontEditor";
 import MotionStudio, { type MatchOption } from "./MotionStudio";
 import { useGoogleFonts } from "./useGoogleFonts";
@@ -130,7 +131,7 @@ export default function BrandEditor({ tournamentId, tournamentName, kind, initia
 
   return (
     <div className="space-y-6">
-    <div className={`grid gap-6 ${kind === "broadcast" ? "" : "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]"}`}>
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
       <div className="min-w-0 space-y-6">
         <div className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
           <button onClick={save} disabled={busy || !dirty} className={btnPrimary}>{busy ? "Guardando…" : "Guardar cambios"}</button>
@@ -236,15 +237,19 @@ export default function BrandEditor({ tournamentId, tournamentName, kind, initia
         </details>
       </div>
 
-      {kind !== "broadcast" && (
-        <div className="min-w-0">
-          <div className="lg:sticky lg:top-4">
+      <div className="min-w-0">
+        <div className="lg:sticky lg:top-4">
+          {kind === "broadcast" ? (
+            <Card title="Vista previa de los marcadores">
+              <ScoreboardPreview settings={settings} logoUrl={logoUrl} tournamentName={tournamentName} teamNames={teamNames} />
+            </Card>
+          ) : (
             <Card title="Vista previa en vivo">
               <BrandPreview kind={kind} settings={settings} logoUrl={logoUrl} tournamentName={tournamentName} teamNames={teamNames} />
             </Card>
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
     <MotionStudio kind={kind} settings={settings} logoUrl={logoUrl} tournamentName={tournamentName} matches={matches} teams={teams} players={players} fixtures={fixtures} divisions={divisions} palette={palette} />
     </div>

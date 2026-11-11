@@ -1703,6 +1703,22 @@ export function drawLiveOverlay(ctx: Ctx, i: SceneInput, o: LiveOverlay) {
   }
 }
 
+/**
+ * Muestra fija para la vista previa de la marca: el marcador del partido (en el estilo elegido)
+ * y, debajo, la barra de medio tiempo / final, con el tema de `i.theme`.
+ */
+export function drawScoreboardSample(ctx: Ctx, i: SceneInput) {
+  const { w, h } = i;
+  const g = ctx.createLinearGradient(0, 0, w, h);
+  g.addColorStop(0, "#0B0F19"); g.addColorStop(1, "#1E2536");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  const bar = i.scoreStyle === "bar";
+  const sw = w * (bar ? 0.62 : 0.44);
+  const sh = sw / boardRatio(i);
+  scoreboard(ctx, i, { x: (w - sw) / 2, y: h * 0.1, w: sw, h: sh }, { clock: "24:34" });
+  resultBar(ctx, i, w / 2, h * 0.58, w * 0.8, 10, 1e9, "Final");
+}
+
 export function drawScene(ctx: Ctx, id: SceneId, input: SceneInput) {
   ctx.save();
   if (!input.transparent) ctx.clearRect(0, 0, input.w, input.h);
