@@ -88,7 +88,7 @@ export const TEMPLATES: TemplateDef[] = [
   { id: "goal", kind: "broadcast", label: "Gol", description: "¡GOL! con el goleador, el minuto y el marcador actualizado.", duration: 5.2, fields: ["match", "home", "away", "homeScore", "awayScore", "side", "player", "minute"] },
   { id: "halftime", kind: "broadcast", label: "Medio tiempo", description: "Resultado al descanso.", duration: 5, fields: ["match", "home", "away", "homeScore", "awayScore"] },
   { id: "fulltime", kind: "broadcast", label: "Final del partido", description: "Resultado final.", duration: 5, fields: ["match", "home", "away", "homeScore", "awayScore"] },
-  { id: "kickoff", kind: "broadcast", label: "Inicio del partido", description: "Presentación de los equipos al arrancar.", duration: 5, fields: ["match", "home", "away"] },
+  { id: "kickoff", kind: "broadcast", label: "Inicio del partido", description: "Secuencia fija de color (cian, naranja, giro del logo en blanco, verde, cian, naranja) con los equipos abajo. No cambia con la marca.", duration: 6.8, fields: ["match", "home", "away"] },
   { id: "yellow", kind: "broadcast", label: "Tarjeta amarilla", description: "Jugador amonestado y minuto.", duration: 4.6, fields: ["match", "home", "away", "player", "minute"] },
   { id: "red", kind: "broadcast", label: "Tarjeta roja", description: "Jugador expulsado y minuto.", duration: 4.6, fields: ["match", "home", "away", "player", "minute"] },
   { id: "substitution", kind: "broadcast", label: "Cambio de jugador", description: "Quién sale, quién entra y el minuto.", duration: 4.8, fields: ["match", "home", "away", "playerOut", "playerIn", "minute"] },
@@ -730,15 +730,105 @@ function sceneResult(ctx: Ctx, i: SceneInput, headline: string, clock: string) {
   drawScoreboardIn(ctx, i, 1.45, outAt, D, { clock });
 }
 
+/* ───────────── inicio del partido: secuencia fija ───────────── */
+
+/**
+ * Tira de color de la secuencia de referencia, en pasos de 0.5. El panel muestra 2 unidades
+ * a la vez y la tira se desliza: verde (0) → cian (3) → naranja (7). No depende de la marca.
+ */
+export const KICKOFF_STRIP = [
+  "#E3FF01", "#ADFE26", "#88FE37", "#12FF6B", "#0CF7A4", "#10F6D0",
+  "#12F4EA", "#1BE7FF", "#3CC0FF", "#6D81FF", "#8E56FF", "#B04BEF", "#F03A9E", "#FF4E60",
+  "#FF6E11", "#FF514C", "#FF4E53", "#F3359B", "#CC3CC5",
+];
+export const KICKOFF_DURATION = 6.8;
+const KO_GREEN = 0, KO_CYAN = 3, KO_ORANGE = 7;
+
+function stripColor(pos: number): string {
+  const x = Math.max(0, Math.min(KICKOFF_STRIP.length - 1, pos * 2));
+  const k = Math.min(KICKOFF_STRIP.length - 2, Math.floor(x));
+  return mix(KICKOFF_STRIP[k], KICKOFF_STRIP[k + 1], x - k);
+}
+
+/**
+ * Estado de la secuencia en t (mismos tiempos que la referencia):
+ * cian → (desliza) naranja → se disuelve a blanco y gira el logo → florece verde → (desliza) cian → (desliza) naranja → blanco.
+ * - pos: posición de la tira. - cover: 0-1, cuánto panel de color se ve. - wipe: "in" florece, "out" se disuelve.
+ * - spin: 0-1 durante el giro del logo (-1 si no gira). - vanish: 0-1 al final, el logo se va girando.
+ */
+export function kickoffState(t: number) {
+  const slide = (from: number, to: number, at: number) => lerp(from, to, easeInOutCubic(progress(t, at, at + 0.32)));
+  const drift = (start: number, end: number) => 0.22 * progress(t, start, end);
+  let pos: number, cover = 1, wipe: "in" | "out" = "in", spin = -1, vanish = 0;
+  if (t < 2.42) {
+    // cian, luego naranja
+    pos = t < 1.05 ? KO_CYAN + drift(0, 1.05) : slide(KO_CYAN + 0.22, KO_ORANGE, 1.05) + drift(1.37, 2.4);
+    if (t < 0.25) cover = easeOutCubic(progress(t, 0, 0.25));
+    if (t >= 2.2) { cover = 1 - progress(t, 2.2, 2.42); wipe = "out"; }
+  } else if (t < 2.85) {
+    pos = KO_GREEN; cover = 0;
+  } else {
+    // verde, cian, naranja
+    pos = t < 4.05 ? KO_GREEN + drift(2.85, 4.05)
+      : t < 5.5 ? slide(KO_GREEN + 0.22, KO_CYAN, 4.05) + drift(4.37, 5.5)
+      : slide(KO_CYAN + 0.22, KO_ORANGE, 5.5) + drift(5.82, 6.6);
+    cover = easeOutCubic(progress(t, 2.85, 3.07));
+    if (t >= 6.4) { cover = 1 - progress(t, 6.4, 6.62); wipe = "out"; }
+  }
+  if (t >= 2.3 && t < 2.95) spin = (t - 2.3) / 0.65;
+  if (t >= 6.35) vanish = progress(t, 6.35, KICKOFF_DURATION - 0.05);
+  return { pos, cover, wipe, spin, vanish };
+}
+
 function sceneKickoff(ctx: Ctx, i: SceneInput) {
-  const D = 5;
-  const outAt = D - 0.45;
-  eventStage(ctx, i, D);
-  slam(ctx, i, "¡COMIENZA!", EVENT_LEAD, i.h * 0.26, 0.17, D, outAt);
-  ctx.save(); ctx.globalAlpha = fade(i.t, 1.15, outAt, D);
-  versus(ctx, i, "VS", i.fonts.numbers, 150);
-  ctx.restore();
-  drawScoreboardIn(ctx, i, 1.45, outAt, D, { clock: "00:00" });
+  const { w, h, t, data } = i;
+  const u = Math.min(w, h) / 1080;
+  const st = kickoffState(t);
+  ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
+  shards(ctx, w, h, t, "#6B4E9B", 0.035);
+
+  const pw = w * 0.5;
+  if (st.cover > 0.001) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, pw, h); ctx.clip();
+    // degradado diagonal: arriba-izquierda → abajo-derecha, 2 unidades de la tira
+    const g = ctx.createLinearGradient(0, 0, pw * 0.55, h);
+    for (let k = 0; k <= 8; k++) g.addColorStop(k / 8, stripColor(st.pos + (k / 8) * 2));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, pw, h);
+    // rayos diagonales: una banda del tono siguiente y otra clara, deslizándose
+    shards(ctx, w, h, t * 1.6 + st.pos * 0.35, stripColor(st.pos + 2.4), 0.16);
+    shards(ctx, w, h, t * 1.6 + 3.1 + st.pos * 0.35, "#FFFFFF", 0.09);
+    // florece / se disuelve con un borde suave que avanza de abajo-izquierda a arriba-derecha
+    if (st.cover < 0.999) {
+      const soft = 0.35;
+      const q = st.wipe === "in" ? lerp(-soft, 1, st.cover) : lerp(-soft, 1, 1 - st.cover);
+      const wg = ctx.createLinearGradient(0, h, pw, 0);
+      const a = clamp01(q), b2 = clamp01(q + soft);
+      const [c0, c1] = st.wipe === "in" ? ["rgba(255,255,255,0)", "#FFFFFF"] : ["#FFFFFF", "rgba(255,255,255,0)"];
+      wg.addColorStop(0, c0); wg.addColorStop(a, c0); wg.addColorStop(Math.max(a, b2), c1); wg.addColorStop(1, c1);
+      ctx.fillStyle = wg; ctx.fillRect(0, 0, pw, h);
+    }
+    ctx.restore();
+  }
+
+  // logo al centro, montado sobre el borde del panel; gira en la fase blanca y al final se va girando
+  const names = fade(t, 0.5, 6.3, 6.6);
+  const cy = h * (w >= h ? 0.44 : 0.46);
+  const lw = w >= h ? w * 0.4 : w * 0.72, lh = w >= h ? h * 0.6 : h * 0.4;
+  if (st.vanish > 0) spinLogo(ctx, i, w / 2, cy, lw, lh, st.vanish, true);
+  else spinLogo(ctx, i, w / 2, cy, lw, lh, st.spin);
+
+  // equipos (discreto, abajo)
+  if (names > 0.001) {
+    const ink = "#37003C";
+    const y = h * (w >= h ? 0.87 : 0.84);
+    const o = { maxW: w * 0.36, stroke: STROKE, strokeW: 12 * u };
+    ctx.save(); ctx.globalAlpha = names;
+    text(ctx, data.home.toUpperCase(), w * 0.26, y, i.fonts.heading, 64 * u, ink, o);
+    text(ctx, "VS", w / 2, y, i.fonts.numbers, 72 * u, ink, { maxW: w * 0.1, stroke: STROKE, strokeW: 12 * u });
+    text(ctx, data.away.toUpperCase(), w * 0.74, y, i.fonts.heading, 64 * u, ink, o);
+    ctx.restore();
+  }
 }
 
 function sceneCard(ctx: Ctx, i: SceneInput, color: string, label: string) {

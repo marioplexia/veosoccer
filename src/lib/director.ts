@@ -30,7 +30,7 @@ export type Shot = {
 };
 
 export const DURATIONS: Record<FullScene, number> = {
-  ident: 5.8, matchup: 6, lineupHome: 10, lineupAway: 10, kickoff: 5, halftime: 5, fulltime: 5, results: 10, standings: 10,
+  ident: 5.8, matchup: 6, lineupHome: 10, lineupAway: 10, kickoff: 6.8, halftime: 5, fulltime: 5, results: 10, standings: 10,
 };
 export const GOAL_SECONDS = 6;
 export const SCORER_SECONDS = 6;

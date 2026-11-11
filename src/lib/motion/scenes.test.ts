@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRANDS } from "@/lib/brand";
-import { DEFAULT_MATCH, FORMATS, TEMPLATES, autoTeamColors, drawLiveOverlay, paletteOf, samplePalette, drawScene, initials, parseFormation, resolveTeamColors, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
+import { DEFAULT_MATCH, FORMATS, KICKOFF_DURATION, KICKOFF_STRIP, TEMPLATES, kickoffState, autoTeamColors, drawLiveOverlay, paletteOf, samplePalette, drawScene, initials, parseFormation, resolveTeamColors, stageState, templateById, vividMid, vividMix, washPalette, type FormatId, type SceneInput } from "./scenes";
 
 /** Contexto 2D falso: registra las llamadas de texto y acepta cualquier otra operación. */
 function fakeCtx() {
@@ -236,6 +236,35 @@ describe("initials", () => {
     expect(initials("Liga Municipal de Fútbol")).toBe("LMF");
     expect(initials("Águilas")).toBe("A");
     expect(initials("  ")).toBe("•");
+  });
+});
+
+describe("inicio del partido (secuencia fija)", () => {
+  it("sigue la secuencia cian → naranja → blanco con giro → verde → cian → naranja → blanco", () => {
+    expect(kickoffState(0.6).pos).toBeCloseTo(3, 0);
+    expect(kickoffState(1.8).pos).toBeCloseTo(7, 0);
+    const white = kickoffState(2.6);
+    expect(white.cover).toBe(0);
+    expect(white.spin).toBeGreaterThan(0);
+    expect(kickoffState(3.5).pos).toBeLessThan(0.5);
+    expect(kickoffState(3.5).cover).toBe(1);
+    expect(kickoffState(4.9).pos).toBeCloseTo(3, 0);
+    expect(kickoffState(6.1).pos).toBeCloseTo(7, 0);
+    expect(kickoffState(KICKOFF_DURATION - 0.1).cover).toBe(0);
+    expect(templateById("kickoff").duration).toBe(KICKOFF_DURATION);
+  });
+  it("la tira desliza sin saltos entre bloques", () => {
+    for (let t = 0.3; t < 2.2; t += 0.02) expect(Math.abs(kickoffState(t + 0.02).pos - kickoffState(t).pos)).toBeLessThan(0.7);
+    for (let t = 3.1; t < 6.4; t += 0.02) expect(Math.abs(kickoffState(t + 0.02).pos - kickoffState(t).pos)).toBeLessThan(0.7);
+  });
+  it("no dice COMIENZA, muestra los equipos y no depende de la marca ni de la paleta", () => {
+    const a = fakeCtx(), b = fakeCtx();
+    drawScene(a.ctx, "kickoff", input("broadcast", "horizontal", 1.8));
+    drawScene(b.ctx, "kickoff", input("broadcast", "horizontal", 1.8, { palette: ["#000000", "#111111", "#222222"], colors: { ...brand("broadcast").colors, scoreBg: "#00FF00" } }));
+    expect(a.texts.join(" ")).not.toMatch(/COMIENZA/);
+    expect(a.texts).toEqual(expect.arrayContaining(["LEONES", "VS", "TIGRES"]));
+    expect(b.texts).toEqual(a.texts);
+    expect(KICKOFF_STRIP).toEqual(expect.arrayContaining(["#12F4EA", "#FF6E11", "#E3FF01", "#8E56FF"]));
   });
 });
 
