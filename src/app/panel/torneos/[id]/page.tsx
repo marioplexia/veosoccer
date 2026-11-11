@@ -41,9 +41,13 @@ export default async function TournamentPage({ params }: { params: Promise<{ id:
     : { data: [] as Goal[] };
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
-      <Link href="/panel" className="text-sm font-medium text-emerald-700 hover:underline">← Mis torneos</Link>
-      <h1 className="mt-2 text-3xl font-bold text-slate-900">{tournament.name}</h1>
+    <main className="min-h-screen pb-10">
+      <header className="text-white" style={{ background: "linear-gradient(90deg,#9B19FF 0%,#7B5CFF 30%,#00B4FF 70%,#05F0FF 100%)" }}>
+        <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 px-4 pb-6 pt-5">
+          <h1 className="min-w-0 text-3xl font-bold tracking-tight sm:text-5xl">{tournament.name}</h1>
+          <Link href="/panel" className="rounded-full bg-[#37003C] px-4 py-2 text-sm font-medium text-white">← Mis torneos</Link>
+        </div>
+      </header>
       <Board
         tournament={tournament as Tournament}
         divisions={(divisions.data ?? []) as Division[]}

@@ -3,11 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { dbError, formatKickoff, fromInputValue, toInputValue } from "@/lib/format";
+import { dbError, fromInputValue, toInputValue } from "@/lib/format";
 import { generateMultiSchedule, venueConflicts } from "@/lib/scheduler";
 import { createClient } from "@/lib/supabase/client";
 import type { Division, Fixture, Goal, Team, Venue } from "@/lib/types";
 import { btnDanger, btnGhost, btnPrimary, Card, Empty, ErrorMsg, inputCls } from "@/components/ui";
+import { CrestImg } from "@/components/matches/MatchesView";
+import { groupByDay, timeOf } from "@/lib/match-view";
+import { mediaUrl } from "@/lib/media";
 import type { BoardData } from "./Board";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -17,6 +20,7 @@ export default function CalendarTab({ tournament, divisions, teams, venues, fixt
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState<string>("all");
+  const [roundSel, setRoundSel] = useState<number | null>(null);
 
   const [startDate, setStartDate] = useState(tournament.start_date ?? today());
   const [firstKickoff, setFirstKickoff] = useState("09:00");
@@ -69,6 +73,13 @@ export default function CalendarTab({ tournament, divisions, teams, venues, fixt
   const visible = filter === "all" ? fixtures : fixtures.filter((f) => f.division_id === filter);
   const rounds = [...new Set(visible.map((f) => f.round))].sort((a, b) => a - b);
   const nextRound = fixtures.length ? Math.max(...fixtures.map((f) => f.round)) : 1;
+  // Jornada en pantalla: la elegida o, si no, la primera con partidos sin jugar.
+  const round = roundSel != null && rounds.includes(roundSel) ? roundSel : rounds.find((r) => visible.some((f) => f.round === r && f.home_score == null)) ?? rounds[rounds.length - 1] ?? 1;
+  const idx = rounds.indexOf(round);
+  const groups = groupByDay(visible.filter((f) => f.round === round));
+  const dated = groups.filter((g) => g.key !== "9999");
+  const range = dated.length === 0 ? "Fechas por definir" : dated.length === 1 ? dated[0].label : `${dated[0].label} – ${dated[dated.length - 1].label}`;
+  const arrow = "grid h-10 w-10 place-items-center rounded-full bg-[#EFE6F0] text-lg text-slate-900 transition hover:bg-[#E3D3E6] disabled:opacity-40";
 
   if (divisions.length === 0) {
     return <Empty>Primero crea una división y agrega equipos para armar el calendario.</Empty>;
@@ -91,7 +102,9 @@ export default function CalendarTab({ tournament, divisions, teams, venues, fixt
         </div>
       )}
 
-      <Card title="Generar calendario automático">
+      <details className="rounded-2xl bg-white p-4 sm:p-5">
+        <summary className="cursor-pointer text-[17px] font-semibold text-slate-900">⚙ Generar calendario automático</summary>
+        <div className="mt-4">
         <p className="mb-4 text-sm text-slate-600">
           Crea todos contra todos en {filter === "all" ? `las ${divisions.length} divisiones` : `la división ${divName(filter)}`} y reparte los partidos entre {venues.length || "0"} canchas y horarios
           {filter === "all" ? ", sin que dos divisiones coincidan en la misma cancha y hora" : ""}. Podrás editar cada partido después.
@@ -118,7 +131,8 @@ export default function CalendarTab({ tournament, divisions, teams, venues, fixt
           {scopeFixtures.length > 0 && <button onClick={clearAll} disabled={busy} className={btnDanger}>Borrar {scopeFixtures.length} partidos</button>}
         </div>
         <div className="mt-3"><ErrorMsg message={error} /></div>
-      </Card>
+        </div>
+      </details>
 
       {conflicts.size > 0 && (
         <p role="status" className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -126,40 +140,39 @@ export default function CalendarTab({ tournament, divisions, teams, venues, fixt
         </p>
       )}
 
-      <Link href={`/panel/torneos/${tournament.id}/partidos`} className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm font-semibold text-white" style={{ background: "linear-gradient(90deg,#9B19FF,#7B5CFF,#00B4FF)" }}>
-        <span>Ver la pantalla de partidos: abre uno para transmitirlo o generar su resumen con IA</span><span aria-hidden>→</span>
-      </Link>
-
       <AddFixture tournamentId={tournament.id} divisions={divisions} teams={teams} venues={venues} nextRound={nextRound} defaultDivision={filter === "all" ? divisions[0].id : filter} />
 
       {visible.length === 0 ? (
         <Empty>Aún no hay partidos. Genera el calendario, impórtalo desde una imagen o agrega uno a mano.</Empty>
       ) : (
-        rounds.map((r) => {
-          const inRound = visible.filter((f) => f.round === r);
-          const divIds = divisions.filter((d) => inRound.some((f) => f.division_id === d.id));
-          return (
-            <Card key={r} title={`Jornada ${r}`}>
-              {divIds.map((d) => (
-                <div key={d.id} className="mb-2 last:mb-0">
-                  {filter === "all" && divisions.length > 1 && (
-                    <h3 className="mt-2 rounded-lg bg-emerald-50 px-3 py-1.5 text-sm font-bold text-emerald-800">{d.name}</h3>
-                  )}
-                  <ul className="divide-y divide-slate-100">
-                    {inRound.filter((f) => f.division_id === d.id).map((f) => (
-                      <FixtureRow
-                        key={`${f.id}-${f.kickoff}-${f.venue_id}-${f.home_score}-${f.away_score}-${f.note}`}
-                        tournamentId={tournament.id} fixture={f} teams={teams} venues={venues}
-                        goals={goals.filter((g) => g.fixture_id === f.id)}
-                        conflict={conflicts.has(f.id)}
-                      />
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </Card>
-          );
-        })
+        <>
+          <div className="flex items-center justify-center gap-6">
+            <button aria-label="Jornada anterior" className={arrow} disabled={idx <= 0} onClick={() => setRoundSel(rounds[idx - 1])}>‹</button>
+            <div className="min-w-[10rem] text-center">
+              <p className="font-semibold text-slate-900">Jornada {round}</p>
+              <p className="text-sm text-slate-500">{range}</p>
+            </div>
+            <button aria-label="Jornada siguiente" className={arrow} disabled={idx >= rounds.length - 1} onClick={() => setRoundSel(rounds[idx + 1])}>›</button>
+          </div>
+          <section className="rounded-2xl bg-white px-3 py-2 sm:px-6">
+            {groups.map((g) => (
+              <div key={g.key} className="py-3">
+                <h3 className="py-2 font-semibold text-slate-900">{g.label}</h3>
+                <ul>
+                  {g.items.map((f) => (
+                    <FixtureRow
+                      key={`${f.id}-${f.kickoff}-${f.venue_id}-${f.home_score}-${f.away_score}-${f.note}`}
+                      tournamentId={tournament.id} fixture={f} teams={teams} venues={venues}
+                      goals={goals.filter((x) => x.fixture_id === f.id)}
+                      conflict={conflicts.has(f.id)}
+                      divisionName={filter === "all" && divisions.length > 1 ? divName(f.division_id) : null}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </section>
+        </>
       )}
     </div>
   );
@@ -234,7 +247,7 @@ function AddFixture({ tournamentId, divisions, teams, venues, nextRound, default
   );
 }
 
-function FixtureRow({ tournamentId, fixture, teams, venues, goals, conflict }: { tournamentId: string; fixture: Fixture; teams: Team[]; venues: Venue[]; goals: Goal[]; conflict: boolean }) {
+function FixtureRow({ tournamentId, fixture, teams, venues, goals, conflict, divisionName }: { tournamentId: string; fixture: Fixture; teams: Team[]; venues: Venue[]; goals: Goal[]; conflict: boolean; divisionName: string | null }) {
   const router = useRouter();
   const name = (id: string) => teams.find((t) => t.id === id)?.name ?? "?";
   const [venue, setVenue] = useState(fixture.venue_id ?? "");
@@ -243,6 +256,7 @@ function FixtureRow({ tournamentId, fixture, teams, venues, goals, conflict }: {
   const [as, setAs] = useState(fixture.away_score?.toString() ?? "");
   const [note, setNote] = useState(fixture.note ?? "");
   const [showGoals, setShowGoals] = useState(false);
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -272,20 +286,39 @@ function FixtureRow({ tournamentId, fixture, teams, venues, goals, conflict }: {
   }
 
   const played = fixture.home_score != null;
+  const crest = (id: string) => {
+    const t = teams.find((x) => x.id === id);
+    return { name: t?.name ?? "?", crestUrl: mediaUrl(createClient(), t?.logo_path) };
+  };
 
   return (
-    <li className="py-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="min-w-[14rem] flex-1">
-          <Link href={`/panel/torneos/${tournamentId}/partidos/${fixture.id}`} className="font-semibold text-slate-900 hover:text-emerald-700 hover:underline" title="Ver el partido a pantalla completa">
-            {name(fixture.home_team_id)} <span className="font-normal text-slate-400">vs</span> {name(fixture.away_team_id)} <span aria-hidden className="text-slate-400">↗</span>
-          </Link>
-          <p className="text-xs text-slate-500">
-            {formatKickoff(fixture.kickoff)}{played ? " · Finalizado" : ""}
-            {fixture.note ? <span className="ml-1 font-medium text-amber-700">· {fixture.note}</span> : null}
-            {conflict ? <span className="ml-1 font-medium text-amber-700">· ⚠ Cancha ocupada a esa hora</span> : null}
-          </p>
-        </div>
+    <li className="border-b border-slate-100 last:border-0">
+      <div className="flex items-center gap-1">
+        <Link href={`/panel/torneos/${tournamentId}/partidos/${fixture.id}`} title="Abrir el partido: datos, transmisión y resumen con IA"
+          className="group grid min-w-0 flex-1 grid-cols-[2.2rem_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 rounded-lg py-3 text-slate-900 hover:bg-[#F6F2F7] sm:gap-3">
+          <span className="text-[11px] font-bold">{played ? "FIN" : ""}</span>
+          <span className="flex min-w-0 items-center justify-end gap-2 sm:gap-3">
+            <span className="truncate text-sm font-semibold group-hover:underline sm:text-base">{name(fixture.home_team_id)}</span><CrestImg team={crest(fixture.home_team_id)} />
+          </span>
+          <span className="min-w-[3.6rem] rounded-md bg-[#F4F1F5] px-2 py-1.5 text-center text-sm font-bold tabular-nums sm:text-base">
+            {played ? `${fixture.home_score} - ${fixture.away_score}` : timeOf(fixture.kickoff) ?? "vs"}
+          </span>
+          <span className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <CrestImg team={crest(fixture.away_team_id)} /><span className="truncate text-sm font-semibold group-hover:underline sm:text-base">{name(fixture.away_team_id)}</span>
+          </span>
+        </Link>
+        <button onClick={() => setOpen((v) => !v)} aria-expanded={open} className={btnGhost}>{open ? "Cerrar" : "Editar"}</button>
+      </div>
+      {(divisionName || fixture.note || conflict) && (
+        <p className="pb-2 text-center text-xs text-slate-500">
+          {divisionName}
+          {fixture.note ? <span className="ml-1 font-medium text-amber-700">· {fixture.note}</span> : null}
+          {conflict ? <span className="ml-1 font-medium text-amber-700">· ⚠ Cancha ocupada a esa hora</span> : null}
+        </p>
+      )}
+      {open && (
+      <div className="mb-3 rounded-xl bg-slate-50 p-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <select aria-label="Cancha" className={`${inputCls} w-40!`} value={venue} onChange={(e) => setVenue(e.target.value)}>
           <option value="">Sin cancha</option>{venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
         </select>
@@ -309,6 +342,8 @@ function FixtureRow({ tournamentId, fixture, teams, venues, goals, conflict }: {
       />
       <div className="mt-2"><ErrorMsg message={error} /></div>
       {showGoals && <GoalsPanel fixture={fixture} teams={teams} goals={goals} />}
+      </div>
+      )}
     </li>
   );
 }
@@ -343,7 +378,7 @@ function GoalsPanel({ fixture, teams, goals }: { fixture: Fixture; teams: Team[]
   }
 
   return (
-    <div className="mt-3 rounded-xl bg-slate-50 p-4">
+    <div className="mt-3 rounded-xl bg-white p-4">
       {goals.length > 0 && (
         <ul className="mb-3 space-y-1 text-sm">
           {[...goals].sort((a, b) => (a.minute ?? 999) - (b.minute ?? 999)).map((g) => (

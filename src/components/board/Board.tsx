@@ -53,24 +53,27 @@ export default function Board(data: BoardData) {
   const palette = identityPalette(liveBrands.tournament);
 
   return (
-    <div className="mt-6">
-      <div role="tablist" aria-label="Secciones del torneo" className="flex gap-1 overflow-x-auto border-b border-slate-200">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
-            className={`whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
-              tab === t.id ? "border-emerald-600 text-emerald-700" : "border-transparent text-slate-500 hover:text-slate-800"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+    <div>
+      {/* pestañas sobre la franja oscura, pegadas al encabezado en degradado */}
+      <div style={{ background: "linear-gradient(90deg,#6A12B8 0%,#5A45C4 30%,#0E7FC0 70%,#12A9BC 100%)" }}>
+        <div role="tablist" aria-label="Secciones del torneo" className="mx-auto flex max-w-[1440px] gap-1 overflow-x-auto px-3">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={`whitespace-nowrap border-b-[3px] px-3 py-2.5 text-sm text-white transition ${
+                tab === t.id ? "border-white font-semibold" : "border-transparent opacity-85 hover:opacity-100"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="mt-6" role="tabpanel">
+      <div className="mx-auto mt-6 max-w-[1440px] px-3 sm:px-4" role="tabpanel">
         {tab === "resumen" && <OverviewTab {...data} goTo={setTab} />}
         {tab === "divisiones" && <DivisionsTab {...data} />}
         {tab === "equipos" && <TeamsTab {...data} goTo={setTab} />}
