@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Room } from "livekit-client";
 import type { BrandSettings } from "@/lib/brand";
-import { direct, liveScore, scorersOf, matchClock, matchMinute, type DirectorState, type LiveEvent, type Phase, type Shot, type Side } from "@/lib/director";
+import { DURATIONS, direct, liveScore, scorersOf, matchClock, matchMinute, type DirectorState, type FullScene, type LiveEvent, type Phase, type Shot, type Side } from "@/lib/director";
 import { buildBroadcastData, buildLineups } from "@/lib/broadcast-data";
 import { renderBroadcastFrame } from "@/lib/motion/broadcast-frame";
 import type { MatchData, SceneInput } from "@/lib/motion/scenes";
+import { drawStadium } from "@/lib/motion/stadium";
 import { useBroadcastImages } from "./useBroadcastImages";
 import { createClient } from "@/lib/supabase/client";
 import type { Fixture, Player, Sponsor, Team } from "@/lib/types";
@@ -17,6 +18,27 @@ const W = 1280, H = 720;
 type Status = "setup" | "connecting" | "live" | "ensayo" | "ended";
 type Ev = LiveEvent & { id: string; goalRowId?: string };
 type Picker = { kind: "goal" | "yellow" | "red" | "sub"; side?: Side; eventId?: string; step: "team" | "player" | "in" };
+
+/** Gráficos que se pueden lanzar a mano desde el reproductor (además del director automático). */
+const GRAPHICS: { scene: FullScene; label: string; needs?: "home" | "away" }[] = [
+  { scene: "ident", label: "Intro" },
+  { scene: "matchup", label: "Presentación" },
+  { scene: "lineupHome", label: "Alineación local", needs: "home" },
+  { scene: "lineupAway", label: "Alineación visitante", needs: "away" },
+  { scene: "kickoff", label: "Inicio" },
+  { scene: "halftime", label: "Medio tiempo" },
+  { scene: "fulltime", label: "Final" },
+  { scene: "standings", label: "Tabla" },
+  { scene: "results", label: "Resultados" },
+];
+const SCENE_LABEL: Record<FullScene, string> = {
+  ident: "Intro", matchup: "Presentación del partido", lineupHome: "Alineación local", lineupAway: "Alineación visitante", kickoff: "Inicio del partido",
+  halftime: "Medio tiempo", fulltime: "Final", standings: "Tabla de posiciones", results: "Resultados de la jornada",
+};
+const hms = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+};
 
 const NEXT_PHASE: Record<Phase, { to: Phase | null; label: string }> = {
   previa: { to: "1T", label: "▶ Iniciar 1er tiempo" },
@@ -61,6 +83,15 @@ export default function LiveStudio(p: Props) {
   const [camError, setCamError] = useState<string | null>(null);
   const [picker, setPicker] = useState<Picker | null>(null);
   const [now, setNow] = useState(Date.now());
+  // Reproductor: gráfico lanzado a mano, micrófono, cámara, nivel de audio, tiempo al aire.
+  const [manual, setManual] = useState<{ scene: FullScene; at: number } | null>(null);
+  const [muted, setMuted] = useState(false);
+  const [facing, setFacing] = useState<"environment" | "user">("environment");
+  const [camReady, setCamReady] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [onAirSince, setOnAirSince] = useState<number | null>(null);
+  const [shotLabel, setShotLabel] = useState("Cámara + marcador");
+  const playerRef = useRef<HTMLDivElement>(null);
   const { images, logo } = useBroadcastImages(supabase, { brandLogoPath: p.brandLogoPath, teams: p.teams, sponsors: p.sponsors, homeId: p.fixture.home_team_id, awayId: p.fixture.away_team_id });
 
   // Recupera el partido en curso si la página se recargó (solo en el navegador, tras montar).
@@ -87,18 +118,46 @@ export default function LiveStudio(p: Props) {
     Promise.all(Object.values(p.brand.fonts).map((f) => document.fonts.load(`${f.italic ? "italic " : ""}${f.weight} 48px "${f.family}"`))).catch(() => undefined).then(() => setFontsReady((n) => n + 1));
   }, [p.brand.fonts]);
 
-  // Cámara trasera + micrófono.
+  // Cámara + micrófono. Al cambiar de cámara se conserva la pista de audio (la que ya puede estar al aire).
   useEffect(() => {
     let cancelled = false;
-    navigator.mediaDevices?.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: true })
+    const keepAudio = streamRef.current?.getAudioTracks() ?? [];
+    setCamReady(false);
+    navigator.mediaDevices?.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: keepAudio.length === 0 })
       .then((ms) => {
         if (cancelled) { ms.getTracks().forEach((t) => t.stop()); return; }
-        streamRef.current = ms;
-        if (videoRef.current) { videoRef.current.srcObject = ms; videoRef.current.play().catch(() => undefined); }
+        streamRef.current?.getVideoTracks().forEach((t) => t.stop());
+        const next = new MediaStream([...ms.getVideoTracks(), ...(keepAudio.length ? keepAudio : ms.getAudioTracks())]);
+        streamRef.current = next;
+        setCamError(null); setCamReady(true);
+        if (videoRef.current) { videoRef.current.srcObject = next; videoRef.current.play().catch(() => undefined); }
       })
-      .catch(() => setCamError("No se pudo abrir la cámara. Da permiso de cámara y micrófono a esta página."));
-    return () => { cancelled = true; streamRef.current?.getTracks().forEach((t) => t.stop()); };
-  }, []);
+      .catch(() => setCamError("No se pudo abrir la cámara. Da permiso de cámara y micrófono a esta página. Mientras tanto ves los gráficos sobre una cancha de muestra."));
+    return () => { cancelled = true; };
+  }, [facing]);
+  useEffect(() => () => { streamRef.current?.getTracks().forEach((t) => t.stop()); }, []);
+
+  // Silenciar el micrófono (también al aire: la pista sigue publicada, pero sin sonido).
+  useEffect(() => { streamRef.current?.getAudioTracks().forEach((t) => { t.enabled = !muted; }); }, [muted, camReady]);
+
+  // Medidor de nivel de audio.
+  useEffect(() => {
+    const ms = streamRef.current;
+    if (!camReady || !ms || ms.getAudioTracks().length === 0) return;
+    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return;
+    const ac = new AC();
+    const an = ac.createAnalyser(); an.fftSize = 256;
+    ac.createMediaStreamSource(new MediaStream(ms.getAudioTracks())).connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    const id = setInterval(() => {
+      an.getByteTimeDomainData(buf);
+      let peak = 0;
+      for (const v of buf) peak = Math.max(peak, Math.abs(v - 128) / 128);
+      setLevel(peak);
+    }, 120);
+    return () => { clearInterval(id); ac.close().catch(() => undefined); };
+  }, [camReady]);
 
   // Mantener la pantalla encendida mientras se transmite.
   useEffect(() => {
@@ -121,8 +180,20 @@ export default function LiveStudio(p: Props) {
   }), [p.fixture, p.teams, p.divisionFixtures, p.sponsors, phase, score.home, score.away, events]);
   const lineups = useMemo(() => buildLineups(p.fixture, p.teams, p.players), [p.fixture, p.teams, p.players]);
 
-  const live = useRef({ directorState, matchData, images, logo, lineups });
-  live.current = { directorState, matchData, images, logo, lineups };
+  const live = useRef({ directorState, matchData, images, logo, lineups, status, manual });
+  live.current = { directorState, matchData, images, logo, lineups, status, manual };
+
+  /** Lo que se ve en el monitor: fuera del aire, cámara con el marcador ya puesto; un gráfico lanzado a mano tiene prioridad. */
+  const shotAt = useCallback((t: number): Shot => {
+    const L = live.current;
+    let shot = direct(L.directorState, t);
+    if (L.status === "setup" || L.status === "connecting" || L.status === "ended") shot = { scoreboard: true, clock: shot.clock };
+    if (L.manual) {
+      const mt = (t - L.manual.at) / 1000;
+      if (mt >= 0 && mt < DURATIONS[L.manual.scene]) shot = { scoreboard: false, clock: shot.clock, full: { scene: L.manual.scene, t: mt } };
+    }
+    return shot;
+  }, []);
 
   // Bucle de dibujo: video + gráficos según el director.
   useEffect(() => {
@@ -133,7 +204,7 @@ export default function LiveStudio(p: Props) {
       if (c && ctx) {
         const L = live.current;
         const t = Date.now();
-        const shot: Shot = direct(L.directorState, t);
+        const shot: Shot = shotAt(t);
         const input: SceneInput = {
           w: W, h: H, t: 0, kind: "broadcast", colors: p.brand.colors, fonts: p.brand.fonts,
           logo: L.logo?.img ?? null, logoSize: L.logo ? { w: L.logo.w, h: L.logo.h } : null,
@@ -145,15 +216,23 @@ export default function LiveStudio(p: Props) {
             const k = Math.max(W / v.videoWidth, H / v.videoHeight);
             const vw = v.videoWidth * k, vh = v.videoHeight * k;
             c2.drawImage(v, (W - vw) / 2, (H - vh) / 2, vw, vh);
+          } else if (L.status !== "live") {
+            // Sin cámara todavía: cancha de muestra, para ver los gráficos desde el primer momento.
+            drawStadium(c2, input, t / 1000);
           }
         });
       }
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
-    const tick = setInterval(() => setNow(Date.now()), 500);
+    const tick = setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      const sh = shotAt(t);
+      setShotLabel(sh.full ? SCENE_LABEL[sh.full.scene] : sh.goal ? "Cámara · animación de gol" : sh.lower ? "Cámara · rótulo" : sh.sponsor ? "Cámara · patrocinador" : sh.scoreboard ? "Cámara + marcador" : "Cámara");
+    }, 500);
     return () => { cancelAnimationFrame(raf); clearInterval(tick); };
-  }, [p.brand, p.palette, p.tournament.name, fontsReady]);
+  }, [p.brand, p.palette, p.tournament.name, fontsReady, shotAt]);
 
   /* ───── salir al aire ───── */
   async function goLive() {
@@ -175,6 +254,7 @@ export default function LiveStudio(p: Props) {
       roomRef.current = room;
       broadcastIdRef.current = json.broadcastId;
       room.on("disconnected", () => setError("Se perdió la conexión con el servidor de transmisión. Revisa la señal y vuelve a iniciar."));
+      setOnAirSince(Date.now());
       setStatus("live");
     } catch (e) {
       setStatus("setup");
@@ -250,10 +330,19 @@ export default function LiveStudio(p: Props) {
   const hc = matchData.homeColor, ac = matchData.awayColor;
   const homeName = matchData.home, awayName = matchData.away;
   const big = "rounded-2xl px-4 py-4 text-lg font-extrabold shadow-sm active:scale-[.98] disabled:opacity-40";
+  const manualOn = manual && now - manual.at < DURATIONS[manual.scene] * 1000 ? manual.scene : null;
+  const ctl = "grid h-10 min-w-10 place-items-center rounded-lg bg-white/10 px-2.5 text-sm font-semibold backdrop-blur transition hover:bg-white/20 disabled:opacity-40";
+  const toggleFullscreen = () => {
+    const el = playerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined); else el.requestFullscreen?.().catch(() => undefined);
+  };
+  const statusPill = status === "live" ? { text: "● EN VIVO", cls: "bg-red-600" } : status === "ensayo" ? { text: "ENSAYO", cls: "bg-amber-500 text-slate-950" }
+    : status === "connecting" ? { text: "CONECTANDO…", cls: "bg-white/20" } : status === "ended" ? { text: "TERMINADA", cls: "bg-white/20" } : { text: "VISTA PREVIA", cls: "bg-white/20" };
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
-      <div className="mx-auto max-w-6xl p-3 sm:p-5">
+      <div className="mx-auto max-w-[1440px] p-3 sm:p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <Link href={`/panel/torneos/${p.tournament.id}`} className="text-sm text-slate-300 hover:text-white">← Volver al torneo</Link>
           <span className={`rounded-full px-3 py-1 text-xs font-bold ${status === "live" ? "bg-red-600" : status === "ensayo" ? "bg-amber-500 text-slate-950" : "bg-slate-700"}`}>
@@ -261,10 +350,49 @@ export default function LiveStudio(p: Props) {
           </span>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-w-0">
-            <canvas ref={canvasRef} width={W} height={H} className="w-full rounded-xl bg-black" aria-label="Vista de la transmisión" />
-            <video ref={videoRef} playsInline muted className="hidden" />
+            {/* reproductor: monitor de programa con barra de estado y controles */}
+            <div ref={playerRef} className="group relative overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
+              <canvas ref={canvasRef} width={W} height={H} className="block aspect-video w-full bg-black object-contain" aria-label="Monitor de la transmisión" />
+              <video ref={videoRef} playsInline muted className="hidden" />
+              {/* estado arriba a la derecha: el marcador de la transmisión ocupa la esquina izquierda */}
+              <div className="pointer-events-none absolute right-3 top-3 flex flex-wrap items-center justify-end gap-2 text-xs font-bold">
+                {status === "live" && onAirSince && <span className="rounded-md bg-black/60 px-2 py-1 font-mono tabular-nums">{hms(now - onAirSince)}</span>}
+                <span className={`rounded-md px-2.5 py-1 ${status === "live" || status === "ensayo" ? statusPill.cls : "bg-black/60"}`}>{statusPill.text}</span>
+                <span className="rounded-md bg-black/60 px-2 py-1 font-medium">720p · 30 fps</span>
+              </div>
+              <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-2 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-3 pb-3 pt-8">
+                <button onClick={() => setMuted((v) => !v)} className={ctl} aria-pressed={muted} aria-label={muted ? "Activar micrófono" : "Silenciar micrófono"} title={muted ? "Activar micrófono" : "Silenciar micrófono"}>{muted ? "🔇" : "🎙️"}</button>
+                <span className="flex h-10 items-center gap-[3px]" role="meter" aria-label="Nivel de audio" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((muted ? 0 : level) * 100)}>
+                  {Array.from({ length: 12 }, (_, k) => {
+                    const on = !muted && level * 12 > k;
+                    return <span key={k} className="w-1.5 rounded-sm" style={{ height: 8 + k * 1.6, background: on ? (k > 9 ? "#EF4444" : k > 6 ? "#FACC15" : "#22C55E") : "rgba(255,255,255,.22)" }} />;
+                  })}
+                </span>
+                <button onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))} className={ctl} aria-label="Cambiar de cámara" title="Cambiar de cámara">🔄</button>
+                <span className="min-w-0 flex-1 truncate px-1 text-xs text-white/85"><span className="font-bold text-white">En pantalla:</span> {shotLabel}</span>
+                <span className="hidden rounded-md bg-white/10 px-2 py-1 text-[11px] font-bold sm:block" title="El director automático decide qué gráfico va en cada momento">🤖 Director IA: {manualOn ? "manual" : "auto"}</span>
+                <button onClick={toggleFullscreen} className={ctl} aria-label="Pantalla completa" title="Pantalla completa">⛶</button>
+              </div>
+            </div>
+
+            {/* gráficos a un toque */}
+            <div className="mt-3 rounded-2xl bg-slate-900 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Gráficos</p>
+                {manualOn && <button onClick={() => setManual(null)} className="rounded-md bg-white/10 px-2 py-1 text-xs font-semibold">✕ Quitar gráfico</button>}
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {GRAPHICS.filter((g) => !g.needs || directorState.lineups[g.needs]).map((g) => (
+                  <button key={g.scene} onClick={() => setManual({ scene: g.scene, at: Date.now() })} aria-pressed={manualOn === g.scene}
+                    className={`shrink-0 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition ${manualOn === g.scene ? "bg-white text-slate-900" : "bg-white/10 hover:bg-white/20"}`}>
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-slate-400">{onAir ? "Tócalo para lanzarlo al aire ahora; al terminar vuelve el director automático." : "Tócalo para ver cómo se verá. Aún no estás al aire."}</p>
+            </div>
             {camError && <p role="alert" className="mt-2 rounded-lg bg-red-900/60 px-3 py-2 text-sm">{camError}</p>}
             {error && <p role="alert" className="mt-2 rounded-lg bg-red-900/60 px-3 py-2 text-sm">{error}</p>}
           </div>
@@ -278,8 +406,8 @@ export default function LiveStudio(p: Props) {
 
             {status === "setup" && (
               <div className="space-y-2 rounded-2xl bg-slate-900 p-4">
-                <p className="text-sm text-slate-300">Coloca el celular en horizontal apuntando a la cancha. El director automático se encarga de los gráficos.</p>
-                <button onClick={goLive} disabled={!p.hasStreamKey || !!camError} className={`${big} w-full bg-red-600`}>● Salir en vivo a Facebook</button>
+                <p className="text-sm text-slate-300">Ya estás viendo el marcador y los gráficos sobre tu cámara. Coloca el celular en horizontal apuntando a la cancha; el director automático se encarga del resto.</p>
+                <button onClick={goLive} disabled={!p.hasStreamKey || !camReady} className={`${big} w-full bg-red-600`}>● Salir en vivo a Facebook</button>
                 {!p.hasStreamKey && <p className="text-xs text-amber-300">Falta tu clave de Facebook (pestaña Transmitir del torneo).</p>}
                 <button onClick={() => setStatus("ensayo")} className={`${big} w-full bg-slate-700 text-base`}>Ensayar sin transmitir</button>
               </div>
