@@ -9,9 +9,10 @@ import type { BrandSettings } from "@/lib/brand";
 import type { Fixture, Goal, Player } from "@/lib/types";
 import { CrestImg, INK } from "./MatchesView";
 import SummaryPanel from "./SummaryPanel";
+import VideoPanel, { type MatchVideos } from "./VideoPanel";
 
 export type DetailTeam = { id: string; name: string; crestUrl: string | null; color: string };
-export type OwnerTools = { liveHref: string; summaryEndpoint: string; summary: MatchSummary | null; fonts: BrandSettings["fonts"]; logoUrl: string | null };
+export type OwnerTools = { liveHref: string; summaryEndpoint: string; summary: MatchSummary | null; fonts: BrandSettings["fonts"]; logoUrl: string | null; videos: MatchVideos };
 
 type Props = {
   tournamentName: string; divisionName: string | null; fixture: Fixture;
@@ -45,7 +46,7 @@ export default function MatchDetail(p: Props) {
     { id: "estadisticas", label: "Estadísticas" },
     { id: "tabla", label: "Tabla de clasificación" },
     { id: "info", label: "Información del partido" },
-    ...(p.owner ? [{ id: "ia", label: "✨ Resumen con IA" }] : []),
+    ...(p.owner ? [{ id: "videos", label: `🎬 Videos${p.owner.videos.clips.length ? ` (${p.owner.videos.clips.length})` : ""}` }, { id: "ia", label: "✨ Resumen con IA" }] : []),
   ];
   const [tab, setTab] = useState("previa");
   const [formMode, setFormMode] = useState<"prev" | "next">("prev");
@@ -247,6 +248,13 @@ export default function MatchDetail(p: Props) {
                 <dt className="opacity-60">Estado</dt><dd className="font-semibold">{played ? `Finalizado ${f.home_score}-${f.away_score}` : "Por jugar"}</dd>
                 {f.note && (<><dt className="opacity-60">Nota</dt><dd className="font-semibold text-amber-700">{f.note}</dd></>)}
               </dl>
+            </section>
+          )}
+
+          {tab === "videos" && p.owner && (
+            <section className={card}>
+              <h2 className="mb-4 text-lg font-semibold">Videos del partido</h2>
+              <VideoPanel videos={p.owner.videos} homeName={home.name} awayName={away.name} />
             </section>
           )}
 

@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Room } from "livekit-client";
 import type { BrandSettings } from "@/lib/brand";
-import { DURATIONS, direct, liveScore, scorersOf, matchClock, matchMinute, type DirectorState, type FullScene, type LiveEvent, type Phase, type Shot, type Side } from "@/lib/director";
+import { DURATIONS, GOAL_SECONDS, direct, liveScore, scorersOf, matchClock, matchMinute, type DirectorState, type FullScene, type LiveEvent, type Phase, type Shot, type Side } from "@/lib/director";
 import { buildBroadcastData, buildLineups } from "@/lib/broadcast-data";
 import { renderBroadcastFrame } from "@/lib/motion/broadcast-frame";
 import type { MatchData, SceneInput } from "@/lib/motion/scenes";
 import { drawStadium } from "@/lib/motion/stadium";
+import { FrameRing, SegmentUploader, baseMime, encodeClip, extOf, pickVideoMime, replayFrameIndex, type Segment } from "@/lib/live-video";
 import { useBroadcastImages } from "./useBroadcastImages";
 import { createClient } from "@/lib/supabase/client";
 import type { Fixture, Player, Sponsor, Team } from "@/lib/types";
@@ -16,7 +17,7 @@ import { useGoogleFonts } from "@/components/brand/useGoogleFonts";
 
 const W = 1280, H = 720;
 type Status = "setup" | "connecting" | "live" | "grabando" | "ensayo" | "ended";
-const REC_MIME = ["video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+
 type Ev = LiveEvent & { id: string; goalRowId?: string };
 type Picker = { kind: "goal" | "yellow" | "red" | "foul" | "sub"; side?: Side; eventId?: string; step: "team" | "player" | "in" };
 
@@ -95,8 +96,20 @@ export default function LiveStudio(p: Props) {
   const playerRef = useRef<HTMLDivElement>(null);
   const [showPad, setShowPad] = useState(true);
   // Grabación en el dispositivo (en lugar de transmitir): se guarda por partes para no llenar la memoria.
+  const segStartRef = useRef(0);
   const recRef = useRef<{ rec: MediaRecorder; chunks: Blob[]; type: string; part: number; stream: MediaStream } | null>(null);
   const [savedParts, setSavedParts] = useState(0);
+  // Grabación en la nube: un segmento cada 30 s, subido en segundo plano.
+  const cloudRef = useRef<{ id: string; idx: number; uploader: SegmentUploader; timer: ReturnType<typeof setInterval> } | null>(null);
+  const [cloud, setCloud] = useState<{ uploaded: number; pending: number; failed: boolean } | null>(null);
+  // Repetición y clips: últimos segundos de la cámara en imágenes pequeñas.
+  const ringRef = useRef(new FrameRing(24_000));
+  const replayRef = useRef<{ bitmaps: ImageBitmap[]; times: number[]; startedAt: number; speed: number } | null>(null);
+  const [replaying, setReplaying] = useState(false);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const clipByEvent = useRef(new Map<string, { id: string; path: string } | "pending" | "cancelled">());
+  const clipQueue = useRef<Promise<void>>(Promise.resolve());
+  const [clipsSaved, setClipsSaved] = useState(0);
   const { images, logo } = useBroadcastImages(supabase, { brandLogoPath: p.brandLogoPath, teams: p.teams, sponsors: p.sponsors, homeId: p.fixture.home_team_id, awayId: p.fixture.away_team_id });
 
   // Recupera el partido en curso si la página se recargó (solo en el navegador, tras montar).
@@ -218,7 +231,20 @@ export default function LiveStudio(p: Props) {
         };
         renderBroadcastFrame(ctx, shot, input, L.lineups, (c2) => {
           c2.fillStyle = "#0B0F19"; c2.fillRect(0, 0, W, H);
-          if (v && v.readyState >= 2 && v.videoWidth) {
+          const R = replayRef.current;
+          const ri = R ? replayFrameIndex(R.times, t - R.startedAt, R.speed) : -1;
+          if (R && ri < 0) { R.bitmaps.forEach((b) => b.close()); replayRef.current = null; setReplaying(false); }
+          if (R && ri >= 0) {
+            // Repetición: se ve la jugada grabada (algo más lenta) con su distintivo.
+            const b = R.bitmaps[ri];
+            const k = Math.max(W / b.width, H / b.height);
+            c2.drawImage(b, (W - b.width * k) / 2, (H - b.height * k) / 2, b.width * k, b.height * k);
+            const bw = 250, bh = 46, bx = (W - bw) / 2, by = 34; // arriba al centro: libre del marcador y de los controles
+            c2.fillStyle = "rgba(55,0,60,.92)"; c2.fillRect(bx, by, bw, bh);
+            c2.fillStyle = "#FFFFFF"; c2.fillRect(bx, by, 8, bh);
+            c2.font = `800 24px "${p.brand.fonts.heading.family}", system-ui, sans-serif`; c2.textAlign = "center"; c2.textBaseline = "middle";
+            c2.fillText("REPETICIÓN", bx + bw / 2 + 4, by + bh / 2 + 1);
+          } else if (v && v.readyState >= 2 && v.videoWidth) {
             const k = Math.max(W / v.videoWidth, H / v.videoHeight);
             const vw = v.videoWidth * k, vh = v.videoHeight * k;
             c2.drawImage(v, (W - vw) / 2, (H - vh) / 2, vw, vh);
@@ -235,7 +261,7 @@ export default function LiveStudio(p: Props) {
       const t = Date.now();
       setNow(t);
       const sh = shotAt(t);
-      setShotLabel(sh.full ? SCENE_LABEL[sh.full.scene] : sh.goal ? "Cámara · animación de gol" : sh.lower ? "Cámara · rótulo" : sh.sponsor ? "Cámara · patrocinador" : sh.scoreboard ? "Cámara + marcador" : "Cámara");
+      setShotLabel(replayRef.current && !sh.full ? "Repetición de la jugada" : sh.full ? SCENE_LABEL[sh.full.scene] : sh.goal ? "Cámara · animación de gol" : sh.lower ? "Cámara · rótulo" : sh.sponsor ? "Cámara · patrocinador" : sh.scoreboard ? "Cámara + marcador" : "Cámara");
     }, 500);
     return () => { cancelAnimationFrame(raf); clearInterval(tick); };
   }, [p.brand, p.palette, p.tournament.name, fontsReady, shotAt]);
@@ -280,13 +306,139 @@ export default function LiveStudio(p: Props) {
     setStatus("ended");
   }
 
+  /* ───── repetición y clips ───── */
+  // Guarda ~24 s de cámara a 15 cuadros por segundo en imágenes pequeñas (unos pocos MB).
+  useEffect(() => {
+    if (!camReady || (status !== "live" && status !== "grabando" && status !== "ensayo")) return;
+    const ring = ringRef.current;
+    const small = document.createElement("canvas");
+    small.width = 640; small.height = 360;
+    const sctx = small.getContext("2d");
+    let busy = false;
+    const id = setInterval(() => {
+      const v = videoRef.current;
+      if (busy || !sctx || !v || v.readyState < 2 || !v.videoWidth || replayRef.current) return;
+      busy = true;
+      const k = Math.max(640 / v.videoWidth, 360 / v.videoHeight);
+      sctx.drawImage(v, (640 - v.videoWidth * k) / 2, (360 - v.videoHeight * k) / 2, v.videoWidth * k, v.videoHeight * k);
+      const t = Date.now();
+      small.toBlob((blob) => { busy = false; if (blob) ring.push({ t, blob }); }, "image/jpeg", 0.62);
+    }, 66);
+    return () => { clearInterval(id); ring.clear(); };
+  }, [camReady, status]);
+  useEffect(() => () => { timersRef.current.forEach(clearTimeout); replayRef.current?.bitmaps.forEach((b) => b.close()); }, []);
+
+  /** Repite en pantalla lo ocurrido entre `from` y `to` (ms). Sale al aire: se dibuja en el mismo lienzo. */
+  const startReplay = useCallback(async (from: number, to: number) => {
+    if (replayRef.current) return;
+    const frames = ringRef.current.window(from, to);
+    if (frames.length < 10) { setError("Aún no hay suficiente video para la repetición. Espera unos segundos."); return; }
+    const bitmaps = (await Promise.all(frames.map((f) => createImageBitmap(f.blob).catch(() => null)))).filter((b): b is ImageBitmap => !!b);
+    if (bitmaps.length < 10) return;
+    replayRef.current = { bitmaps, times: frames.slice(0, bitmaps.length).map((f) => f.t), startedAt: Date.now(), speed: 0.7 };
+    setReplaying(true);
+  }, []);
+  const replayNow = () => { const t = Date.now(); void startReplay(t - 10_000, t); };
+
+  /** Tras un gol: repetición automática al terminar la animación y, si se transmite o se graba, un clip guardado en la nube. */
+  function afterGoal(ev: Ev) {
+    const at = ev.at;
+    timersRef.current.push(setTimeout(() => { void startReplay(at - 9000, at + 1500); }, GOAL_SECONDS * 1000 + 300));
+    if (status !== "live" && status !== "grabando") return;
+    clipByEvent.current.set(ev.id, "pending");
+    timersRef.current.push(setTimeout(() => {
+      const frames = ringRef.current.window(at - 11_000, at + 3200);
+      const team = ev.side === "home" ? matchData.home : matchData.away;
+      clipQueue.current = clipQueue.current.then(async () => {
+        if (clipByEvent.current.get(ev.id) === "cancelled") return;
+        const clip = await encodeClip(frames, { w: 640, h: 360, label: `GOL · ${team} · ${ev.minute}'` });
+        if (!clip || clipByEvent.current.get(ev.id) === "cancelled") return;
+        const id = crypto.randomUUID();
+        const path = `${p.tournament.id}/${p.fixture.id}/clips/${id}.${extOf(clip.mime)}`;
+        const up = await supabase.storage.from("match-video").upload(path, clip.blob, { contentType: clip.mime });
+        if (up.error) return;
+        const { error } = await supabase.from("match_clips").insert({ id, tournament_id: p.tournament.id, fixture_id: p.fixture.id, side: ev.side, minute: ev.minute, path, mime: clip.mime });
+        if (error) { await supabase.storage.from("match-video").remove([path]); return; }
+        if (clipByEvent.current.get(ev.id) === "cancelled") { await supabase.from("match_clips").delete().eq("id", id); await supabase.storage.from("match-video").remove([path]); return; }
+        clipByEvent.current.set(ev.id, { id, path });
+        setClipsSaved((n) => n + 1);
+      }).catch(() => undefined);
+    }, 3400));
+  }
+
+  /* ───── grabar en la nube (por segmentos) ───── */
+  async function endSegment(): Promise<{ blob: Blob; type: string; part: number } | null> {
+    const R = recRef.current;
+    if (!R) return null;
+    recRef.current = null;
+    await new Promise<void>((res) => { R.rec.onstop = () => res(); try { R.rec.stop(); } catch { res(); } });
+    R.stream.getVideoTracks().forEach((t) => t.stop());
+    return R.chunks.length ? { blob: new Blob(R.chunks, { type: baseMime(R.type) }), type: R.type, part: R.part } : null;
+  }
+  async function rotateSegment(last = false) {
+    const C = cloudRef.current, old = recRef.current;
+    if (!C || !old) return;
+    const startedAt = segStartRef.current;
+    recRef.current = null;
+    if (!last) startRecorder(C.idx + 1); // el siguiente empieza antes de cerrar el anterior, para no dejar hueco
+    const now = Date.now();
+    segStartRef.current = now;
+    await new Promise<void>((res) => { old.rec.onstop = () => res(); try { old.rec.stop(); } catch { res(); } });
+    old.stream.getVideoTracks().forEach((t) => t.stop());
+    if (old.chunks.length) C.uploader.add({ idx: C.idx, blob: new Blob(old.chunks, { type: baseMime(old.type) }), durationMs: Math.min(600_000, now - startedAt) });
+    C.idx += 1;
+  }
+  async function startCloudRecording() {
+    setError(null);
+    const type = pickVideoMime();
+    if (!type) { setError("Este navegador no puede grabar video. Prueba con Chrome o Safari actualizados."); return; }
+    const mime = baseMime(type);
+    const { data, error } = await supabase.from("recordings").insert({ tournament_id: p.tournament.id, fixture_id: p.fixture.id, mime }).select("id").single();
+    if (error || !data) { setError("No se pudo iniciar la grabación en la nube (revisa tu conexión). Puedes grabar solo en este dispositivo."); return; }
+    const recId = data.id as string;
+    const sync = () => { const C = cloudRef.current; if (C) setCloud({ uploaded: C.uploader.uploaded, pending: C.uploader.pending, failed: C.uploader.failedOnce && C.uploader.pending > 0 }); };
+    const uploader = new SegmentUploader(async (seg: Segment) => {
+      const path = `${p.tournament.id}/${p.fixture.id}/rec/${recId}/${String(seg.idx).padStart(4, "0")}.${extOf(mime)}`;
+      const up = await supabase.storage.from("match-video").upload(path, seg.blob, { contentType: mime, upsert: true });
+      if (up.error) return false;
+      const row = await supabase.from("recording_segments").upsert({ recording_id: recId, idx: seg.idx, path, duration_ms: seg.durationMs });
+      return !row.error;
+    }, sync);
+    if (!startRecorder(0)) return;
+    segStartRef.current = Date.now();
+    cloudRef.current = { id: recId, idx: 0, uploader, timer: setInterval(() => { void rotateSegment(); }, 30_000) };
+    setCloud({ uploaded: 0, pending: 0, failed: false });
+    setSavedParts(0);
+    setOnAirSince(Date.now());
+    setStatus("grabando");
+  }
+  async function stopCloudRecording() {
+    const C = cloudRef.current;
+    if (!C || !window.confirm("¿Terminar la grabación? Se subirá lo que falte a tu cuenta.")) return;
+    clearInterval(C.timer);
+    await rotateSegment(true);
+    setStatus("ended");
+    const ok = await C.uploader.flush();
+    if (ok) await supabase.from("recordings").update({ status: "complete" }).eq("id", C.id);
+    setCloud({ uploaded: C.uploader.uploaded, pending: C.uploader.pending, failed: !ok });
+  }
+  async function retryUploads() {
+    const C = cloudRef.current;
+    if (!C) return;
+    setCloud((c) => (c ? { ...c, failed: false } : c));
+    const ok = await C.uploader.flush();
+    if (ok && status === "ended") await supabase.from("recordings").update({ status: "complete" }).eq("id", C.id);
+    setCloud({ uploaded: C.uploader.uploaded, pending: C.uploader.pending, failed: !ok });
+  }
+  useEffect(() => () => { if (cloudRef.current) clearInterval(cloudRef.current.timer); }, []);
+
   /* ───── grabar en el dispositivo ───── */
   function startRecorder(part: number): boolean {
     const canvas = canvasRef.current;
-    const type = typeof MediaRecorder === "undefined" ? null : REC_MIME.find((m) => MediaRecorder.isTypeSupported(m));
+    const type = pickVideoMime();
     if (!canvas || !type) { setError("Este navegador no puede grabar video. Prueba con Chrome o Safari actualizados."); return false; }
     const stream = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...(streamRef.current?.getAudioTracks() ?? [])]);
-    const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 });
+    const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: cloudRef.current || part === 0 ? 1_500_000 : 2_500_000, audioBitsPerSecond: 96_000 });
     const chunks: Blob[] = [];
     rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     rec.start(2000);
@@ -295,16 +447,12 @@ export default function LiveStudio(p: Props) {
   }
   /** Cierra la parte en curso y la descarga. Hay que llamarla desde un toque del usuario (el navegador lo exige para descargar). */
   async function savePart() {
-    const R = recRef.current;
-    if (!R) return;
-    recRef.current = null;
-    await new Promise<void>((res) => { R.rec.onstop = () => res(); try { R.rec.stop(); } catch { res(); } });
-    R.stream.getVideoTracks().forEach((t) => t.stop()); // la pista del lienzo; el micrófono sigue en uso
-    if (R.chunks.length === 0) return;
+    const seg = await endSegment();
+    if (!seg) return;
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob(R.chunks, { type: R.type.split(";")[0] }));
+    a.href = URL.createObjectURL(seg.blob);
     const slug = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
-    a.download = `${slug(matchData.home)}-vs-${slug(matchData.away)}-parte-${R.part}.${R.type.startsWith("video/mp4") ? "mp4" : "webm"}`;
+    a.download = `${slug(matchData.home)}-vs-${slug(matchData.away)}-parte-${seg.part}.${extOf(seg.type)}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
     setSavedParts((n) => n + 1);
@@ -323,11 +471,11 @@ export default function LiveStudio(p: Props) {
   }
   // Avisar antes de cerrar la pestaña con una grabación sin guardar.
   useEffect(() => {
-    if (status !== "grabando") return;
+    if (status !== "grabando" && !(cloud && cloud.pending > 0)) return;
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [status]);
+  }, [status, cloud]);
 
   /* ───── eventos del partido ───── */
   const saveScore = useCallback(async (s: { home: number; away: number }) => {
@@ -345,6 +493,7 @@ export default function LiveStudio(p: Props) {
 
   function goal(side: Side) {
     const ev = addEvent({ kind: "goal", side });
+    afterGoal(ev);
     setPicker({ kind: "goal", side, eventId: ev.id, step: "player" });
   }
 
@@ -366,6 +515,14 @@ export default function LiveStudio(p: Props) {
     if (last.kind === "goal") {
       await saveScore(liveScore(base, next));
       if (last.goalRowId) await supabase.from("fixture_goals").delete().eq("id", last.goalRowId);
+      // El clip de ese gol tampoco debe quedar guardado.
+      const clip = clipByEvent.current.get(last.id);
+      clipByEvent.current.set(last.id, "cancelled");
+      if (clip && typeof clip === "object") {
+        await supabase.from("match_clips").delete().eq("id", clip.id);
+        await supabase.storage.from("match-video").remove([clip.path]);
+        setClipsSaved((n) => Math.max(0, n - 1));
+      }
     }
   }
 
@@ -377,7 +534,7 @@ export default function LiveStudio(p: Props) {
     setPhaseStartedAt(Date.now());
     if (to === "1T") saveScore(score);
     // Al medio tiempo se guarda la primera parte y se sigue grabando en otra, para no acumular todo el partido en memoria.
-    if (to === "descanso" && recRef.current) { const next = recRef.current.part + 1; savePart().then(() => { startRecorder(next); }); }
+    if (to === "descanso" && recRef.current && !cloudRef.current) { const next = recRef.current.part + 1; savePart().then(() => { startRecorder(next); }); }
   }
 
   const teamPlayers = (side: Side) => p.players.filter((x) => x.team_id === (side === "home" ? p.fixture.home_team_id : p.fixture.away_team_id));
@@ -404,7 +561,7 @@ export default function LiveStudio(p: Props) {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <Link href={`/panel/torneos/${p.tournament.id}`} className="text-sm text-slate-300 hover:text-white">← Volver al torneo</Link>
           <span className={`rounded-full px-3 py-1 text-xs font-bold ${status === "live" || status === "grabando" ? "bg-red-600" : status === "ensayo" ? "bg-amber-500 text-slate-950" : "bg-slate-700"}`}>
-            {status === "live" ? "● EN VIVO EN FACEBOOK" : status === "grabando" ? "● GRABANDO EN ESTE DISPOSITIVO" : status === "ensayo" ? "ENSAYO · no sale al aire" : status === "connecting" ? "Conectando…" : status === "ended" ? "Transmisión terminada" : "Preparando"}
+            {status === "live" ? "● EN VIVO EN FACEBOOK" : status === "grabando" ? (cloud ? "● GRABANDO EN LA NUBE" : "● GRABANDO EN ESTE DISPOSITIVO") : status === "ensayo" ? "ENSAYO · no sale al aire" : status === "connecting" ? "Conectando…" : status === "ended" ? "Transmisión terminada" : "Preparando"}
           </span>
         </div>
 
@@ -447,6 +604,7 @@ export default function LiveStudio(p: Props) {
                 <button onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))} className={ctl} aria-label="Cambiar de cámara" title="Cambiar de cámara">🔄</button>
                 <span className="min-w-0 flex-1 truncate px-1 text-xs text-white/85"><span className="font-bold text-white">En pantalla:</span> {shotLabel}</span>
                 <span className="hidden rounded-md bg-white/10 px-2 py-1 text-[11px] font-bold sm:block" title="El director automático decide qué gráfico va en cada momento">🤖 Director IA: {manualOn ? "manual" : "auto"}</span>
+                {onAir && <button onClick={replayNow} disabled={replaying || !camReady} className={ctl} title="Repetir los últimos 10 segundos">⏪ <span className="ml-1 hidden sm:inline">Repetición</span></button>}
                 {onAir && NEXT_PHASE[phase].to && <button onClick={advancePhase} className={`${ctl} bg-white! text-slate-950`}>{NEXT_PHASE[phase].label}</button>}
                 {onAir && <button onClick={undo} disabled={events.length === 0} className={ctl} aria-label="Deshacer el último evento" title="Deshacer el último evento">↶</button>}
                 {onAir && <button onClick={() => setShowPad((v) => !v)} className={ctl} aria-pressed={showPad} aria-label={showPad ? "Ocultar botones del partido" : "Mostrar botones del partido"} title={showPad ? "Ocultar botones del partido" : "Mostrar botones del partido"}>{showPad ? "🎛️" : "👁️"}</button>}
@@ -530,8 +688,9 @@ export default function LiveStudio(p: Props) {
                 <p className="text-sm text-slate-300">Ya estás viendo el marcador y los gráficos sobre tu cámara. Coloca el celular en horizontal apuntando a la cancha; el director automático se encarga del resto.</p>
                 <button onClick={goLive} disabled={!p.hasStreamKey || !camReady} className={`${big} w-full bg-red-600`}>● Salir en vivo a Facebook</button>
                 {!p.hasStreamKey && <p className="text-xs text-amber-300">Falta tu clave de Facebook (pestaña Transmitir del torneo).</p>}
-                <button onClick={startRecording} disabled={!camReady} className={`${big} w-full bg-white text-base text-slate-900`}>⏺ Grabar el partido (sin Facebook)</button>
-                <p className="text-xs text-slate-400">La grabación se guarda en este dispositivo: una parte al medio tiempo y otra al terminar. No cierres esta pestaña.</p>
+                <button onClick={startCloudRecording} disabled={!camReady} className={`${big} w-full bg-white text-base text-slate-900`}>⏺ Grabar el partido en la nube</button>
+                <p className="text-xs text-slate-400">Sin Facebook. El video se sube a tu cuenta cada 30 segundos y queda en la ficha del partido, con un clip de cada gol.</p>
+                <button onClick={startRecording} disabled={!camReady} className={`${big} w-full bg-slate-700 text-base`}>Grabar solo en este dispositivo</button>
                 <button onClick={() => setStatus("ensayo")} className={`${big} w-full bg-slate-700 text-base`}>Ensayar sin transmitir</button>
               </div>
             )}
@@ -545,13 +704,25 @@ export default function LiveStudio(p: Props) {
                   {status === "live"
                     ? <button onClick={endBroadcast} className={`${big} bg-slate-800 text-sm text-red-300`}>■ Terminar</button>
                     : status === "grabando"
-                    ? <button onClick={stopRecording} className={`${big} bg-slate-800 text-sm text-red-300`}>■ Terminar y guardar</button>
+                    ? <button onClick={cloud ? stopCloudRecording : stopRecording} className={`${big} bg-slate-800 text-sm text-red-300`}>■ Terminar y guardar</button>
                     : <button onClick={() => setStatus("setup")} className={`${big} bg-slate-800 text-sm`}>Salir del ensayo</button>}
                 </div>
               </>
             )}
+            {cloud && (status === "grabando" || status === "ended") && (
+              <div className="rounded-2xl bg-slate-900 p-3 text-xs text-slate-300" role="status">
+                <p>☁️ En la nube: <b className="text-white">{cloud.uploaded}</b> {cloud.uploaded === 1 ? "segmento subido" : "segmentos subidos"}{cloud.pending > 0 ? ` · ${cloud.pending} por subir` : status === "ended" ? " · grabación completa" : ""}</p>
+                {cloud.failed && (
+                  <div className="mt-2">
+                    <p className="text-amber-300">No se pudo subir todo (¿sin señal?). No cierres esta pestaña: lo pendiente sigue guardado aquí.</p>
+                    <button onClick={retryUploads} className="mt-2 rounded-lg bg-white px-3 py-1.5 font-semibold text-slate-900">Reintentar subida</button>
+                  </div>
+                )}
+              </div>
+            )}
+            {clipsSaved > 0 && <p className="rounded-2xl bg-slate-900 p-3 text-xs text-slate-300">🎬 {clipsSaved} {clipsSaved === 1 ? "clip de gol guardado" : "clips de gol guardados"} en la ficha del partido.</p>}
             {status === "grabando" && savedParts > 0 && <p className="rounded-2xl bg-slate-900 p-3 text-xs text-slate-300">Parte {savedParts} guardada en tus descargas. Sigue grabando la parte {savedParts + 1}.</p>}
-            {status === "ended" && <p className="rounded-2xl bg-slate-900 p-4 text-sm text-slate-300">{savedParts > 0 ? `La grabación terminó: ${savedParts} ${savedParts === 1 ? "archivo guardado" : "archivos guardados"} en las descargas de este dispositivo. ` : "La transmisión terminó. "}El marcador quedó guardado en el torneo.</p>}
+            {status === "ended" && <p className="rounded-2xl bg-slate-900 p-4 text-sm text-slate-300">{cloud ? (cloud.pending === 0 ? "La grabación terminó y quedó guardada en la ficha del partido. " : "La grabación terminó; falta subir una parte. ") : savedParts > 0 ? `La grabación terminó: ${savedParts} ${savedParts === 1 ? "archivo guardado" : "archivos guardados"} en las descargas de este dispositivo. ` : "La transmisión terminó. "}El marcador quedó guardado en el torneo.</p>}
           </div>
         </div>
       </div>
