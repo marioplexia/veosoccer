@@ -124,3 +124,15 @@ describe("scorersOf", () => {
     expect(scorersOf(ev)).toEqual({ home: ["Ana 12', 34'"], away: ["Luz 51'"] });
   });
 });
+
+describe("falta", () => {
+  it("muestra un rótulo con el equipo (o el jugador si se indicó) y vuelve al marcador", () => {
+    const s = base({ phase: "1T", names: { home: "Leones", away: "Tigres" }, events: [{ kind: "foul", at: at(60), side: "away", minute: 1 }] });
+    const shot = direct(s, at(62));
+    expect(shot.lower).toMatchObject({ kind: "foul", side: "away", text: "Tigres", minute: 1 });
+    expect(shot.scoreboard).toBe(true);
+    const named = base({ phase: "1T", events: [{ kind: "foul", at: at(60), side: "home", minute: 1, player: "Ana" }] });
+    expect(direct(named, at(62)).lower?.text).toBe("Ana");
+    expect(direct(s, at(120)).lower).toBeUndefined();
+  });
+});

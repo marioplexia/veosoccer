@@ -15,9 +15,10 @@ import type { Fixture, Player, Sponsor, Team } from "@/lib/types";
 import { useGoogleFonts } from "@/components/brand/useGoogleFonts";
 
 const W = 1280, H = 720;
-type Status = "setup" | "connecting" | "live" | "ensayo" | "ended";
+type Status = "setup" | "connecting" | "live" | "grabando" | "ensayo" | "ended";
+const REC_MIME = ["video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
 type Ev = LiveEvent & { id: string; goalRowId?: string };
-type Picker = { kind: "goal" | "yellow" | "red" | "sub"; side?: Side; eventId?: string; step: "team" | "player" | "in" };
+type Picker = { kind: "goal" | "yellow" | "red" | "foul" | "sub"; side?: Side; eventId?: string; step: "team" | "player" | "in" };
 
 /** Gráficos que se pueden lanzar a mano desde el reproductor (además del director automático). */
 const GRAPHICS: { scene: FullScene; label: string; needs?: "home" | "away" }[] = [
@@ -92,6 +93,10 @@ export default function LiveStudio(p: Props) {
   const [onAirSince, setOnAirSince] = useState<number | null>(null);
   const [shotLabel, setShotLabel] = useState("Cámara + marcador");
   const playerRef = useRef<HTMLDivElement>(null);
+  const [showPad, setShowPad] = useState(true);
+  // Grabación en el dispositivo (en lugar de transmitir): se guarda por partes para no llenar la memoria.
+  const recRef = useRef<{ rec: MediaRecorder; chunks: Blob[]; type: string; part: number; stream: MediaStream } | null>(null);
+  const [savedParts, setSavedParts] = useState(0);
   const { images, logo } = useBroadcastImages(supabase, { brandLogoPath: p.brandLogoPath, teams: p.teams, sponsors: p.sponsors, homeId: p.fixture.home_team_id, awayId: p.fixture.away_team_id });
 
   // Recupera el partido en curso si la página se recargó (solo en el navegador, tras montar).
@@ -161,7 +166,7 @@ export default function LiveStudio(p: Props) {
 
   // Mantener la pantalla encendida mientras se transmite.
   useEffect(() => {
-    if (status !== "live" && status !== "ensayo") return;
+    if (status !== "live" && status !== "ensayo" && status !== "grabando") return;
     let lock: { release: () => Promise<void> } | null = null;
     (navigator as unknown as { wakeLock?: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> } }).wakeLock?.request("screen").then((l) => { lock = l; }).catch(() => undefined);
     return () => { lock?.release().catch(() => undefined); };
@@ -171,6 +176,7 @@ export default function LiveStudio(p: Props) {
   const directorState: DirectorState = {
     phase, phaseStartedAt, events, sponsors: p.sponsors.length, adEveryMinutes: p.adEveryMinutes,
     lineups: { home: p.players.some((x) => x.team_id === p.fixture.home_team_id), away: p.players.some((x) => x.team_id === p.fixture.away_team_id) },
+    names: { home: p.teams.find((t) => t.id === p.fixture.home_team_id)?.name ?? "Local", away: p.teams.find((t) => t.id === p.fixture.away_team_id)?.name ?? "Visitante" },
   };
 
   // Datos para los gráficos (tabla y resultados con el marcador en vivo).
@@ -274,6 +280,55 @@ export default function LiveStudio(p: Props) {
     setStatus("ended");
   }
 
+  /* ───── grabar en el dispositivo ───── */
+  function startRecorder(part: number): boolean {
+    const canvas = canvasRef.current;
+    const type = typeof MediaRecorder === "undefined" ? null : REC_MIME.find((m) => MediaRecorder.isTypeSupported(m));
+    if (!canvas || !type) { setError("Este navegador no puede grabar video. Prueba con Chrome o Safari actualizados."); return false; }
+    const stream = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...(streamRef.current?.getAudioTracks() ?? [])]);
+    const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 });
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.start(2000);
+    recRef.current = { rec, chunks, type, part, stream };
+    return true;
+  }
+  /** Cierra la parte en curso y la descarga. Hay que llamarla desde un toque del usuario (el navegador lo exige para descargar). */
+  async function savePart() {
+    const R = recRef.current;
+    if (!R) return;
+    recRef.current = null;
+    await new Promise<void>((res) => { R.rec.onstop = () => res(); try { R.rec.stop(); } catch { res(); } });
+    R.stream.getVideoTracks().forEach((t) => t.stop()); // la pista del lienzo; el micrófono sigue en uso
+    if (R.chunks.length === 0) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(R.chunks, { type: R.type.split(";")[0] }));
+    const slug = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+    a.download = `${slug(matchData.home)}-vs-${slug(matchData.away)}-parte-${R.part}.${R.type.startsWith("video/mp4") ? "mp4" : "webm"}`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
+    setSavedParts((n) => n + 1);
+  }
+  function startRecording() {
+    setError(null);
+    if (!startRecorder(1)) return;
+    setSavedParts(0);
+    setOnAirSince(Date.now());
+    setStatus("grabando");
+  }
+  async function stopRecording() {
+    if (!window.confirm("¿Terminar la grabación? El video se guardará en este dispositivo.")) return;
+    await savePart();
+    setStatus("ended");
+  }
+  // Avisar antes de cerrar la pestaña con una grabación sin guardar.
+  useEffect(() => {
+    if (status !== "grabando") return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [status]);
+
   /* ───── eventos del partido ───── */
   const saveScore = useCallback(async (s: { home: number; away: number }) => {
     const { error } = await supabase.from("fixtures").update({ home_score: s.home, away_score: s.away }).eq("id", p.fixture.id);
@@ -321,23 +376,26 @@ export default function LiveStudio(p: Props) {
     setPhase(to);
     setPhaseStartedAt(Date.now());
     if (to === "1T") saveScore(score);
+    // Al medio tiempo se guarda la primera parte y se sigue grabando en otra, para no acumular todo el partido en memoria.
+    if (to === "descanso" && recRef.current) { const next = recRef.current.part + 1; savePart().then(() => { startRecorder(next); }); }
   }
 
   const teamPlayers = (side: Side) => p.players.filter((x) => x.team_id === (side === "home" ? p.fixture.home_team_id : p.fixture.away_team_id));
   const clock = matchClock(phase, phaseStartedAt, now);
   const inPlay = phase === "1T" || phase === "2T";
-  const onAir = status === "live" || status === "ensayo";
+  const onAir = status === "live" || status === "ensayo" || status === "grabando";
   const hc = matchData.homeColor, ac = matchData.awayColor;
   const homeName = matchData.home, awayName = matchData.away;
   const big = "rounded-2xl px-4 py-4 text-lg font-extrabold shadow-sm active:scale-[.98] disabled:opacity-40";
   const manualOn = manual && now - manual.at < DURATIONS[manual.scene] * 1000 ? manual.scene : null;
+  const pad = "rounded-xl font-extrabold text-white shadow-lg backdrop-blur-sm transition active:scale-95 disabled:opacity-35";
   const ctl = "grid h-10 min-w-10 place-items-center rounded-lg bg-white/10 px-2.5 text-sm font-semibold backdrop-blur transition hover:bg-white/20 disabled:opacity-40";
   const toggleFullscreen = () => {
     const el = playerRef.current;
     if (!el) return;
     if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined); else el.requestFullscreen?.().catch(() => undefined);
   };
-  const statusPill = status === "live" ? { text: "● EN VIVO", cls: "bg-red-600" } : status === "ensayo" ? { text: "ENSAYO", cls: "bg-amber-500 text-slate-950" }
+  const statusPill = status === "live" ? { text: "● EN VIVO", cls: "bg-red-600" } : status === "grabando" ? { text: "● GRABANDO", cls: "bg-red-600" } : status === "ensayo" ? { text: "ENSAYO", cls: "bg-amber-500 text-slate-950" }
     : status === "connecting" ? { text: "CONECTANDO…", cls: "bg-white/20" } : status === "ended" ? { text: "TERMINADA", cls: "bg-white/20" } : { text: "VISTA PREVIA", cls: "bg-white/20" };
 
   return (
@@ -345,8 +403,8 @@ export default function LiveStudio(p: Props) {
       <div className="mx-auto max-w-[1440px] p-3 sm:p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <Link href={`/panel/torneos/${p.tournament.id}`} className="text-sm text-slate-300 hover:text-white">← Volver al torneo</Link>
-          <span className={`rounded-full px-3 py-1 text-xs font-bold ${status === "live" ? "bg-red-600" : status === "ensayo" ? "bg-amber-500 text-slate-950" : "bg-slate-700"}`}>
-            {status === "live" ? "● EN VIVO EN FACEBOOK" : status === "ensayo" ? "ENSAYO · no sale al aire" : status === "connecting" ? "Conectando…" : status === "ended" ? "Transmisión terminada" : "Preparando"}
+          <span className={`rounded-full px-3 py-1 text-xs font-bold ${status === "live" || status === "grabando" ? "bg-red-600" : status === "ensayo" ? "bg-amber-500 text-slate-950" : "bg-slate-700"}`}>
+            {status === "live" ? "● EN VIVO EN FACEBOOK" : status === "grabando" ? "● GRABANDO EN ESTE DISPOSITIVO" : status === "ensayo" ? "ENSAYO · no sale al aire" : status === "connecting" ? "Conectando…" : status === "ended" ? "Transmisión terminada" : "Preparando"}
           </span>
         </div>
 
@@ -358,11 +416,27 @@ export default function LiveStudio(p: Props) {
               <video ref={videoRef} playsInline muted className="hidden" />
               {/* estado arriba a la derecha: el marcador de la transmisión ocupa la esquina izquierda */}
               <div className="pointer-events-none absolute right-3 top-3 flex flex-wrap items-center justify-end gap-2 text-xs font-bold">
-                {status === "live" && onAirSince && <span className="rounded-md bg-black/60 px-2 py-1 font-mono tabular-nums">{hms(now - onAirSince)}</span>}
-                <span className={`rounded-md px-2.5 py-1 ${status === "live" || status === "ensayo" ? statusPill.cls : "bg-black/60"}`}>{statusPill.text}</span>
+                {(status === "live" || status === "grabando") && onAirSince && <span className="rounded-md bg-black/60 px-2 py-1 font-mono tabular-nums">{hms(now - onAirSince)}</span>}
+                <span className={`rounded-md px-2.5 py-1 ${onAir ? statusPill.cls : "bg-black/60"}`}>{statusPill.text}</span>
                 <span className="rounded-md bg-black/60 px-2 py-1 font-medium">720p · 30 fps</span>
               </div>
-              <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-2 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-3 pb-3 pt-8">
+              {/* botonera del partido dentro del monitor (no sale en el video: solo la ve quien opera) */}
+              {onAir && showPad && (
+                <>
+                  {/* a los lados, para no tapar el centro de la imagen ni los rótulos */}
+                  <div className="absolute left-2 top-1/2 z-10 flex w-[5.2rem] -translate-y-1/2 flex-col gap-1.5 sm:w-28">
+                    <button onClick={() => goal("home")} disabled={!inPlay} className={`${pad} px-2 py-3 text-sm sm:py-5 sm:text-lg`} style={{ background: `${hc}E6` }}>⚽ GOL<br /><span className="block truncate text-[11px] font-bold sm:text-sm">{homeName}</span></button>
+                    <button onClick={() => setPicker({ kind: "yellow", step: "team" })} disabled={!inPlay} className={`${pad} bg-yellow-400/95 px-2 py-2 text-xs text-slate-950 sm:text-sm`}>🟨 Amarilla</button>
+                    <button onClick={() => setPicker({ kind: "red", step: "team" })} disabled={!inPlay} className={`${pad} bg-red-600/95 px-2 py-2 text-xs sm:text-sm`}>🟥 Roja</button>
+                  </div>
+                  <div className="absolute right-2 top-1/2 z-10 flex w-[5.2rem] -translate-y-1/2 flex-col gap-1.5 sm:w-28">
+                    <button onClick={() => goal("away")} disabled={!inPlay} className={`${pad} px-2 py-3 text-sm sm:py-5 sm:text-lg`} style={{ background: `${ac}E6` }}>⚽ GOL<br /><span className="block truncate text-[11px] font-bold sm:text-sm">{awayName}</span></button>
+                    <button onClick={() => setPicker({ kind: "foul", step: "team" })} disabled={!inPlay} className={`${pad} bg-orange-500/95 px-2 py-2 text-xs sm:text-sm`}>✋ Falta</button>
+                    <button onClick={() => setPicker({ kind: "sub", step: "team" })} disabled={!inPlay} className={`${pad} bg-sky-600/95 px-2 py-2 text-xs sm:text-sm`}>🔁 Cambio</button>
+                  </div>
+                </>
+              )}
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-2 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-3 pb-3 pt-8 [&>*]:pointer-events-auto">
                 <button onClick={() => setMuted((v) => !v)} className={ctl} aria-pressed={muted} aria-label={muted ? "Activar micrófono" : "Silenciar micrófono"} title={muted ? "Activar micrófono" : "Silenciar micrófono"}>{muted ? "🔇" : "🎙️"}</button>
                 <span className="flex h-10 items-center gap-[3px]" role="meter" aria-label="Nivel de audio" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((muted ? 0 : level) * 100)}>
                   {Array.from({ length: 12 }, (_, k) => {
@@ -373,8 +447,55 @@ export default function LiveStudio(p: Props) {
                 <button onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))} className={ctl} aria-label="Cambiar de cámara" title="Cambiar de cámara">🔄</button>
                 <span className="min-w-0 flex-1 truncate px-1 text-xs text-white/85"><span className="font-bold text-white">En pantalla:</span> {shotLabel}</span>
                 <span className="hidden rounded-md bg-white/10 px-2 py-1 text-[11px] font-bold sm:block" title="El director automático decide qué gráfico va en cada momento">🤖 Director IA: {manualOn ? "manual" : "auto"}</span>
+                {onAir && NEXT_PHASE[phase].to && <button onClick={advancePhase} className={`${ctl} bg-white! text-slate-950`}>{NEXT_PHASE[phase].label}</button>}
+                {onAir && <button onClick={undo} disabled={events.length === 0} className={ctl} aria-label="Deshacer el último evento" title="Deshacer el último evento">↶</button>}
+                {onAir && <button onClick={() => setShowPad((v) => !v)} className={ctl} aria-pressed={showPad} aria-label={showPad ? "Ocultar botones del partido" : "Mostrar botones del partido"} title={showPad ? "Ocultar botones del partido" : "Mostrar botones del partido"}>{showPad ? "🎛️" : "👁️"}</button>}
                 <button onClick={toggleFullscreen} className={ctl} aria-label="Pantalla completa" title="Pantalla completa">⛶</button>
               </div>
+      {picker && (
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center" role="dialog" aria-modal="true" aria-label="Elegir">
+                  <div className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-slate-900 p-4">
+                    {picker.step === "team" && (
+                      <>
+                        <p className="mb-3 font-bold">¿De qué equipo?</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(["home", "away"] as const).map((side) => (
+                            <button key={side} className={big} style={{ background: side === "home" ? hc : ac }}
+                              onClick={() => {
+                                const ev = addEvent(picker.kind === "sub" ? { kind: "sub", side } : { kind: picker.kind as "yellow" | "red" | "foul", side });
+                                setPicker({ kind: picker.kind, side, eventId: ev.id, step: picker.kind === "sub" ? "player" : "player" });
+                              }}>
+                              {side === "home" ? homeName : awayName}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {picker.step !== "team" && picker.side && picker.eventId && (
+                      <>
+                        <p className="mb-1 font-bold">
+                          {picker.kind === "goal" ? "¿Quién anotó?" : picker.kind === "sub" ? (picker.step === "in" ? "¿Quién entra?" : "¿Quién sale?") : "¿Qué jugador?"}
+                        </p>
+                        <p className="mb-3 text-xs text-slate-400">{picker.kind === "goal" ? "La animación ya está en pantalla; esto agrega el nombre." : "Opcional."}</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {teamPlayers(picker.side).map((pl) => (
+                            <button key={pl.id} className="rounded-xl bg-slate-800 px-3 py-3 text-left text-sm font-semibold active:bg-slate-700"
+                              onClick={() => {
+                                const field = picker.kind === "sub" ? (picker.step === "in" ? "playerIn" : "playerOut") : "player";
+                                setEventPlayer(picker.eventId!, pl, field);
+                                if (picker.kind === "sub" && picker.step === "player") setPicker({ ...picker, step: "in" }); else setPicker(null);
+                              }}>
+                              {pl.number != null && <span className="mr-1 text-slate-400">{pl.number}</span>}{pl.name}
+                            </button>
+                          ))}
+                        </div>
+                        {teamPlayers(picker.side).length === 0 && <p className="text-sm text-slate-400">Este equipo no tiene plantilla cargada.</p>}
+                        <button onClick={() => setPicker(null)} className="mt-3 w-full rounded-xl bg-slate-700 py-3 text-sm font-semibold">Omitir</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* gráficos a un toque */}
@@ -409,79 +530,32 @@ export default function LiveStudio(p: Props) {
                 <p className="text-sm text-slate-300">Ya estás viendo el marcador y los gráficos sobre tu cámara. Coloca el celular en horizontal apuntando a la cancha; el director automático se encarga del resto.</p>
                 <button onClick={goLive} disabled={!p.hasStreamKey || !camReady} className={`${big} w-full bg-red-600`}>● Salir en vivo a Facebook</button>
                 {!p.hasStreamKey && <p className="text-xs text-amber-300">Falta tu clave de Facebook (pestaña Transmitir del torneo).</p>}
+                <button onClick={startRecording} disabled={!camReady} className={`${big} w-full bg-white text-base text-slate-900`}>⏺ Grabar el partido (sin Facebook)</button>
+                <p className="text-xs text-slate-400">La grabación se guarda en este dispositivo: una parte al medio tiempo y otra al terminar. No cierres esta pestaña.</p>
                 <button onClick={() => setStatus("ensayo")} className={`${big} w-full bg-slate-700 text-base`}>Ensayar sin transmitir</button>
               </div>
             )}
 
             {onAir && (
               <>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => goal("home")} disabled={!inPlay} className={big} style={{ background: hc }}>⚽ GOL<br /><span className="text-sm font-bold">{homeName}</span></button>
-                  <button onClick={() => goal("away")} disabled={!inPlay} className={big} style={{ background: ac }}>⚽ GOL<br /><span className="text-sm font-bold">{awayName}</span></button>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <button onClick={() => setPicker({ kind: "yellow", step: "team" })} disabled={!inPlay} className={`${big} bg-yellow-400 text-base text-slate-900`}>Amarilla</button>
-                  <button onClick={() => setPicker({ kind: "red", step: "team" })} disabled={!inPlay} className={`${big} bg-red-600 text-base`}>Roja</button>
-                  <button onClick={() => setPicker({ kind: "sub", step: "team" })} disabled={!inPlay} className={`${big} bg-emerald-600 text-base`}>Cambio</button>
-                </div>
+                <p className="rounded-2xl bg-slate-900 p-4 text-sm text-slate-300">Los botones de gol, tarjetas, falta y cambio están dentro del monitor, para usarlos también en pantalla completa. {inPlay ? "" : "Se activan al iniciar el tiempo."}</p>
                 {NEXT_PHASE[phase].to && <button onClick={advancePhase} className={`${big} w-full bg-white text-slate-900`}>{NEXT_PHASE[phase].label}</button>}
                 <div className="grid grid-cols-2 gap-2">
                   <button onClick={undo} disabled={events.length === 0} className={`${big} bg-slate-800 text-sm`}>↶ Deshacer</button>
                   {status === "live"
                     ? <button onClick={endBroadcast} className={`${big} bg-slate-800 text-sm text-red-300`}>■ Terminar</button>
+                    : status === "grabando"
+                    ? <button onClick={stopRecording} className={`${big} bg-slate-800 text-sm text-red-300`}>■ Terminar y guardar</button>
                     : <button onClick={() => setStatus("setup")} className={`${big} bg-slate-800 text-sm`}>Salir del ensayo</button>}
                 </div>
               </>
             )}
-            {status === "ended" && <p className="rounded-2xl bg-slate-900 p-4 text-sm text-slate-300">La transmisión terminó. El marcador quedó guardado en el torneo.</p>}
+            {status === "grabando" && savedParts > 0 && <p className="rounded-2xl bg-slate-900 p-3 text-xs text-slate-300">Parte {savedParts} guardada en tus descargas. Sigue grabando la parte {savedParts + 1}.</p>}
+            {status === "ended" && <p className="rounded-2xl bg-slate-900 p-4 text-sm text-slate-300">{savedParts > 0 ? `La grabación terminó: ${savedParts} ${savedParts === 1 ? "archivo guardado" : "archivos guardados"} en las descargas de este dispositivo. ` : "La transmisión terminó. "}El marcador quedó guardado en el torneo.</p>}
           </div>
         </div>
       </div>
 
-      {picker && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center" role="dialog" aria-modal="true" aria-label="Elegir">
-          <div className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-slate-900 p-4">
-            {picker.step === "team" && (
-              <>
-                <p className="mb-3 font-bold">¿De qué equipo?</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {(["home", "away"] as const).map((side) => (
-                    <button key={side} className={big} style={{ background: side === "home" ? hc : ac }}
-                      onClick={() => {
-                        const ev = addEvent(picker.kind === "sub" ? { kind: "sub", side } : { kind: picker.kind as "yellow" | "red", side });
-                        setPicker({ kind: picker.kind, side, eventId: ev.id, step: picker.kind === "sub" ? "player" : "player" });
-                      }}>
-                      {side === "home" ? homeName : awayName}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-            {picker.step !== "team" && picker.side && picker.eventId && (
-              <>
-                <p className="mb-1 font-bold">
-                  {picker.kind === "goal" ? "¿Quién anotó?" : picker.kind === "sub" ? (picker.step === "in" ? "¿Quién entra?" : "¿Quién sale?") : "¿Qué jugador?"}
-                </p>
-                <p className="mb-3 text-xs text-slate-400">{picker.kind === "goal" ? "La animación ya está en pantalla; esto agrega el nombre." : "Opcional."}</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {teamPlayers(picker.side).map((pl) => (
-                    <button key={pl.id} className="rounded-xl bg-slate-800 px-3 py-3 text-left text-sm font-semibold active:bg-slate-700"
-                      onClick={() => {
-                        const field = picker.kind === "sub" ? (picker.step === "in" ? "playerIn" : "playerOut") : "player";
-                        setEventPlayer(picker.eventId!, pl, field);
-                        if (picker.kind === "sub" && picker.step === "player") setPicker({ ...picker, step: "in" }); else setPicker(null);
-                      }}>
-                      {pl.number != null && <span className="mr-1 text-slate-400">{pl.number}</span>}{pl.name}
-                    </button>
-                  ))}
-                </div>
-                {teamPlayers(picker.side).length === 0 && <p className="text-sm text-slate-400">Este equipo no tiene plantilla cargada.</p>}
-                <button onClick={() => setPicker(null)} className="mt-3 w-full rounded-xl bg-slate-700 py-3 text-sm font-semibold">Omitir</button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </main>
   );
 }

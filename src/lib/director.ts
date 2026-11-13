@@ -6,7 +6,7 @@ export type Side = "home" | "away";
 
 export type LiveEvent =
   | { kind: "goal"; at: number; side: Side; minute: number; player?: string }
-  | { kind: "yellow" | "red"; at: number; side: Side; minute: number; player?: string }
+  | { kind: "yellow" | "red" | "foul"; at: number; side: Side; minute: number; player?: string }
   | { kind: "sub"; at: number; side: Side; minute: number; playerOut?: string; playerIn?: string };
 
 export type DirectorState = {
@@ -16,6 +16,8 @@ export type DirectorState = {
   sponsors: number;       // cantidad de patrocinadores con logo
   adEveryMinutes: number;
   lineups: { home: boolean; away: boolean };
+  /** Nombres de los equipos, para rótulos sin jugador (por ejemplo una falta). */
+  names?: { home: string; away: string };
 };
 
 export type FullScene = "ident" | "matchup" | "lineupHome" | "lineupAway" | "kickoff" | "halftime" | "fulltime" | "results" | "standings";
@@ -25,7 +27,7 @@ export type Shot = {
   scoreboard: boolean;
   clock: string;
   goal?: { side: Side; t: number; player?: string; minute: number };
-  lower?: { kind: "yellow" | "red" | "sub" | "scorer"; side: Side; t: number; text: string; minute: number };
+  lower?: { kind: "yellow" | "red" | "foul" | "sub" | "scorer"; side: Side; t: number; text: string; minute: number };
   sponsor?: { index: number; t: number; slot: number }; // slot par: tarjeta; impar: franja LED
 };
 
@@ -133,7 +135,7 @@ export function direct(s: DirectorState, now: number): Shot {
     } else if (t < LOWER_SECONDS) {
       const text = recent.kind === "sub"
         ? `${recent.playerIn ?? "Entra"} ↔ ${recent.playerOut ?? "Sale"}`
-        : recent.player ?? (recent.kind === "yellow" ? "Tarjeta amarilla" : "Tarjeta roja");
+        : recent.player ?? (recent.kind === "yellow" ? "Tarjeta amarilla" : recent.kind === "red" ? "Tarjeta roja" : s.names?.[recent.side] ?? "Falta");
       shot.lower = { kind: recent.kind, side: recent.side, t, text, minute: recent.minute };
       return shot;
     }

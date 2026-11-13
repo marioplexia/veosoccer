@@ -1653,7 +1653,7 @@ export type LiveOverlay = {
   scoreboard: boolean;
   clock: string;
   goal?: { side: "home" | "away"; t: number };
-  lower?: { kind: "yellow" | "red" | "sub" | "scorer"; side: "home" | "away"; t: number; text: string; minute: number };
+  lower?: { kind: "yellow" | "red" | "foul" | "sub" | "scorer"; side: "home" | "away"; t: number; text: string; minute: number };
   sponsor?: { index: number; t: number };
 };
 
@@ -1678,7 +1678,7 @@ export function drawLiveOverlay(ctx: Ctx, i: SceneInput, o: LiveOverlay) {
     const L = o.lower;
     const dur = L.kind === "scorer" ? 6 : 7;
     const slide = progress(L.t, 0, 0.5) * (1 - progress(L.t, dur - 0.5, dur));
-    const label = L.kind === "yellow" ? "AMARILLA · " : L.kind === "red" ? "ROJA · " : L.kind === "sub" ? "CAMBIO · " : "GOL · ";
+    const label = L.kind === "yellow" ? "AMARILLA · " : L.kind === "red" ? "ROJA · " : L.kind === "foul" ? "FALTA · " : L.kind === "sub" ? "CAMBIO · " : "GOL · ";
     lowerThird(ctx, i, h * 0.78, slide, label + L.text, `${L.minute}'`);
   }
   if (o.sponsor && data.sponsors.length > 0) {
